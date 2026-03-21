@@ -522,9 +522,39 @@
     </div>
 </div>
 
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js";
+    import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyCc3aGTZ_gnnoP62TJgc430SEz_E17NGfk",
+        authDomain: "sgt-pro.firebaseapp.com",
+        projectId: "sgt-pro",
+        storageBucket: "sgt-pro.firebasestorage.app",
+        messagingSenderId: "349270713573",
+        appId: "1:349270713573:web:123e2e28cd7749e43ca00c"
+    };
+
+    // Inicializa o Firebase
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    // Salva os recursos do banco na janela do navegador para o script de baixo conseguir usar
+    window.db = db;
+    window.doc = doc;
+    window.setDoc = setDoc;
+    window.getDoc = getDoc;
+
+    // Dispara a função que busca os dados da nuvem (se ela já existir)
+    if(typeof window.carregarDadosDaNuvem === 'function') {
+        window.carregarDadosDaNuvem();
+    }
+</script>
+
 <script>
-    let os = JSON.parse(localStorage.getItem('sgt_v4_os')) || [];
-    let insumos = JSON.parse(localStorage.getItem('sgt_v4_in')) || [];
+    // Agora as variáveis começam zeradas (vão ser preenchidas pela nuvem)
+    let os = [];
+    let insumos = [];
     let editOSIndex = null;
     let editInsumoIndex = null;
 
@@ -534,27 +564,67 @@
     document.getElementById('globalInicio').value = pDia;
     document.getElementById('globalFim').value = uDia;
     
-    // Setando o seletor de mês e ano para o atual ao abrir
     document.getElementById('mesFiltro').value = d.getMonth().toString();
     document.getElementById('anoFiltro').value = d.getFullYear().toString();
 
     lucide.createIcons();
 
-    // Filtro rápido combinando Mês e Ano
+    // ==========================================
+    // NOVA FUNÇÃO: CARREGAR DADOS DO FIREBASE
+    // ==========================================
+    window.carregarDadosDaNuvem = async function() {
+        try {
+            const docRef = window.doc(window.db, "sistema", "dadosGerais");
+            const docSnap = await window.getDoc(docRef);
+
+            if (docSnap.exists()) {
+                const dados = docSnap.data();
+                os = dados.os || [];
+                insumos = dados.insumos || [];
+            } else {
+                console.log("Banco de dados vazio. Iniciando do zero.");
+            }
+            atualizarTudo();
+        } catch (error) {
+            console.error("Erro ao puxar dados do Firebase:", error);
+            alert("Não foi possível carregar seus dados da nuvem. Verifique sua internet.");
+            atualizarTudo();
+        }
+    };
+
+    // ==========================================
+    // NOVA FUNÇÃO: SALVAR DADOS NO FIREBASE
+    // ==========================================
+    window.salvarTudo = async function() { 
+        try {
+            if (!window.db) {
+                alert("Conexão com banco de dados ainda não estabelecida.");
+                return;
+            }
+            // Envia tudo para o documento "dadosGerais" na coleção "sistema"
+            await window.setDoc(window.doc(window.db, "sistema", "dadosGerais"), {
+                os: os,
+                insumos: insumos
+            });
+            atualizarTudo(); 
+        } catch (error) {
+            alert("Erro ao salvar na nuvem! Verifique sua conexão e regras do Firebase.");
+            console.error(error);
+        }
+    };
+
     function filtrarPorDataRapida() {
         const mes = document.getElementById('mesFiltro').value;
         const ano = document.getElementById('anoFiltro').value;
 
-        if (ano === "") return; // Precisa pelo menos do ano
+        if (ano === "") return; 
 
         let primeiroDia, ultimoDia;
 
         if (mes !== "") {
-            // Filtra o mês específico daquele ano
             primeiroDia = new Date(ano, parseInt(mes), 1).toISOString().split('T')[0];
             ultimoDia = new Date(ano, parseInt(mes) + 1, 0).toISOString().split('T')[0];
         } else {
-            // Filtra o ano inteiro
             primeiroDia = new Date(ano, 0, 1).toISOString().split('T')[0];
             ultimoDia = new Date(ano, 11, 31).toISOString().split('T')[0];
         }
@@ -564,7 +634,6 @@
         atualizarTudo();
     }
 
-    // Limpar filtros globais (mostrar tudo)
     function limparFiltrosGlobais() {
         document.getElementById('mesFiltro').value = "";
         document.getElementById('anoFiltro').value = "";
@@ -573,7 +642,6 @@
         atualizarTudo();
     }
 
-    // Limpar dropdowns se a data for digitada manualmente
     function atualizarSincroniaDatas() {
         document.getElementById('mesFiltro').value = "";
         document.getElementById('anoFiltro').value = "";
@@ -604,7 +672,7 @@
         };
         if(!obj.cliente) return alert("Nome do cliente é obrigatório!");
         if(editOSIndex === null) os.push(obj); else os[editOSIndex] = obj;
-        resetOS(); salvarTudo();
+        resetOS(); window.salvarTudo();
     }
 
     function editarOS(i){
@@ -624,12 +692,12 @@
         if(indexParaExcluir !== null && confirm("Deseja apagar PERMANENTEMENTE esta OS?")){ 
             os.splice(indexParaExcluir, 1); 
             resetOS(); 
-            salvarTudo(); 
+            window.salvarTudo(); 
         } 
     }
 
     function resetOS(){ editOSIndex = null; document.getElementById('btnExcluirOS').style.display = 'none'; ['osCliente','osModelo','osDefeito','osPecas','osMao'].forEach(id => document.getElementById(id).value = ''); }
-    function mudarStatus(i, v){ os[i].status = v; salvarTudo(); }
+    function mudarStatus(i, v){ os[i].status = v; window.salvarTudo(); }
 
     function renderOS(){
         const lista = document.getElementById('listaOS');
@@ -697,7 +765,7 @@
         };
         if(!obj.desc || !obj.valor) return alert("Preencha descrição e valor!");
         if(editInsumoIndex === null) insumos.push(obj); else insumos[editInsumoIndex] = obj;
-        resetInsumo(); salvarTudo();
+        resetInsumo(); window.salvarTudo();
     }
 
     function editarInsumo(i){
@@ -714,7 +782,7 @@
         if(indexParaExcluir !== null && confirm("Excluir registro de gasto?")){ 
             insumos.splice(indexParaExcluir, 1); 
             resetInsumo(); 
-            salvarTudo(); 
+            window.salvarTudo(); 
         } 
     }
     
@@ -771,7 +839,6 @@
         consolidado.forEach(item => {
             if((tipo === 'todos' || item.cat === tipo) && estaNoPeriodo(item.data, fInicio, fFim)){
                 
-                // Soma para os totalizadores
                 if (item.valor > 0) {
                     totalEntradas += item.valor;
                 } else {
@@ -792,13 +859,11 @@
             }
         });
 
-        // Atualizando a Interface do Relatório
         document.getElementById('finResReceita').innerText = formatarMoeda(totalEntradas);
         document.getElementById('finResCusto').innerText = formatarMoeda(totalSaidas);
         document.getElementById('finResSaldo').innerText = formatarMoeda(totalPeriodo);
         document.getElementById('finResSaldo').style.color = totalPeriodo >= 0 ? 'var(--success)' : 'var(--danger)';
 
-        // Atualizando o texto que vai para a Impressão (PDF)
         document.getElementById('resumoFinalRelatorio').innerHTML = `
             Receitas: <span style="color:var(--success)">${formatarMoeda(totalEntradas)}</span> <br>
             Custos: <span style="color:var(--danger)">${formatarMoeda(totalSaidas)}</span> <br><br>
@@ -849,30 +914,26 @@
     }
 
     function atualizarTudo(){ renderOS(); renderInsumos(); renderFinanceiro(); atualizarDashboard(); }
-    function salvarTudo(){ 
-        localStorage.setItem('sgt_v4_os', JSON.stringify(os)); 
-        localStorage.setItem('sgt_v4_in', JSON.stringify(insumos)); 
-        atualizarTudo(); 
-    }
+    
     function exportarDados() {
         const blob = new Blob([JSON.stringify({os, insumos})], {type: 'application/json'});
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `SGT_Backup_${new Date().toISOString().split('T')[0]}.json`; a.click();
     }
+    
     function importarDados() {
         const input = document.createElement('input'); input.type = 'file';
         input.onchange = e => {
             const reader = new FileReader();
             reader.onload = re => {
                 const c = JSON.parse(re.target.result);
-                os = c.os || []; insumos = c.insumos || []; salvarTudo();
-                alert("Dados restaurados com sucesso!");
+                os = c.os || []; insumos = c.insumos || []; window.salvarTudo();
+                alert("Dados restaurados com sucesso para a Nuvem!");
             };
             reader.readAsText(e.target.files[0]);
         };
         input.click();
     }
 
-    atualizarTudo();
 </script>
 
 </body>
