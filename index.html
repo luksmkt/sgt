@@ -128,7 +128,7 @@
         .input-group label { font-size: 0.85rem; font-weight: 600; color: var(--text-main); }
 
         input, select, textarea { padding: 12px 16px; border-radius: 10px; border: 1px solid var(--border); background: #f8fafc; font-size: 0.95rem; outline: none; width: 100%; }
-        input:focus { border-color: var(--primary); background: #fff; box-shadow: 0 0 0 4px var(--primary-soft); }
+        input:focus, select:focus, textarea:focus { border-color: var(--primary); background: #fff; box-shadow: 0 0 0 4px var(--primary-soft); }
 
         .btn { padding: 12px 24px; border-radius: 10px; border: none; cursor: pointer; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; gap: 10px; font-size: 0.95rem; }
         .btn-primary { background: var(--primary); color: white; }
@@ -151,6 +151,10 @@
         .status-Cancelado, .badge-gray { background: #f1f5f9; color: #475569; }
         .badge-red { background: #fee2e2; color: #991b1b; }
         .badge-purple { background: #f3e8ff; color: #6b21a8; }
+
+        /* Botões de Aumentar/Diminuir Estoque */
+        .btn-qtd { background: white; border: 1px solid var(--border); border-radius: 6px; padding: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: var(--text-muted); transition: all 0.2s; }
+        .btn-qtd:hover { background: var(--primary-soft); color: var(--primary-dark); border-color: var(--primary); }
 
         /* Ações Ícone Mestre (Hover Menu Melhorado) */
         .action-menu { position: relative; display: inline-block; }
@@ -202,6 +206,30 @@
         }
         .receipt-box { border: 2px solid #000; padding: 30px; max-width: 800px; margin: 0 auto; background: white; }
         .empty { text-align: center; color: var(--text-muted); font-weight: 500; }
+
+        /* Modal QR Code App */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.4); backdrop-filter: blur(4px);
+            display: flex; justify-content: center; align-items: center;
+            z-index: 2000; opacity: 0; visibility: hidden; transition: all 0.3s ease;
+        }
+        .modal-overlay.open { opacity: 1; visibility: visible; }
+        
+        .modal-content {
+            background: var(--card); padding: 30px; border-radius: var(--radius-lg);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2); width: 100%; max-width: 350px;
+            text-align: center; transform: translateY(20px); transition: all 0.3s ease;
+            position: relative; border: 1px solid var(--border);
+        }
+        .modal-overlay.open .modal-content { transform: translateY(0); }
+        
+        .close-modal {
+            position: absolute; top: 15px; right: 15px; background: transparent;
+            border: none; cursor: pointer; color: var(--text-muted); padding: 5px;
+            border-radius: 8px; display: flex; align-items: center; justify-content: center;
+        }
+        .close-modal:hover { color: var(--danger); background: #fff1f2; }
     </style>
 </head>
 <body>
@@ -221,6 +249,7 @@
     <div class="sidebar-footer">
         <button data-title="Fazer Backup" onclick="exportarDados()"><i data-lucide="database"></i> <span class="nav-text">Backup</span></button>
         <button data-title="Restaurar Dados" onclick="importarDados()"><i data-lucide="upload-cloud"></i> <span class="nav-text">Restaurar</span></button>
+        <button data-title="App Mobile" onclick="abrirQRModal()"><i data-lucide="smartphone"></i> <span class="nav-text">App Mobile</span></button>
     </div>
 </aside>
 
@@ -357,9 +386,25 @@
                 <div style="text-align:right"><button id="btnSalvarEst" class="btn btn-primary" onclick="salvarEstoque()"><i data-lucide="plus"></i> Salvar Item</button></div>
             </div>
             <div class="card">
-                <div class="input-group" style="margin-bottom: 20px; position: relative;">
-                    <i data-lucide="search" size="18" style="position: absolute; left: 12px; top: 12px; color: var(--text-muted);"></i>
-                    <input type="text" id="buscaEst" oninput="renderEstoque()" placeholder="Pesquisar produtos ou serviços..." style="padding-left: 40px;">
+                <div style="display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap;">
+                    <div class="input-group" style="position: relative; flex: 1; min-width: 250px;">
+                        <i data-lucide="search" size="18" style="position: absolute; left: 12px; top: 12px; color: var(--text-muted);"></i>
+                        <input type="text" id="buscaEst" oninput="renderEstoque()" placeholder="Pesquisar produtos ou serviços..." style="padding-left: 40px; margin: 0;">
+                    </div>
+                    <div class="input-group" style="flex: 0 1 200px;">
+                        <select id="filtroEstTipo" onchange="renderEstoque()" style="margin: 0; cursor: pointer;">
+                            <option value="">Todos os Tipos</option>
+                            <option value="produto">Apenas Produtos</option>
+                            <option value="servico">Apenas Serviços</option>
+                        </select>
+                    </div>
+                    <div class="input-group" style="flex: 0 1 200px;">
+                        <select id="filtroEstEstoque" onchange="renderEstoque()" style="margin: 0; cursor: pointer;">
+                            <option value="">Todo o Estoque</option>
+                            <option value="com_estoque">Com Estoque (> 0)</option>
+                            <option value="sem_estoque">Sem Estoque (0)</option>
+                        </select>
+                    </div>
                 </div>
                 <div class="table-container">
                     <table>
@@ -493,7 +538,7 @@
     </div>
 </main>
 
-<!-- ÁREA DE IMPRESSÃO DA OS ATUALIZADA -->
+<!-- ÁREA DE IMPRESSÃO DA OS -->
 <div id="receipt-area">
     <div class="receipt-box">
         <div style="text-align:center; border-bottom: 2px solid #000; padding-bottom: 20px; margin-bottom: 20px;">
@@ -535,9 +580,24 @@
     </div>
 </div>
 
+<!-- MODAL QR CODE APP MOBILE -->
+<div id="qrModal" class="modal-overlay no-print" onclick="if(event.target === this) fecharQRModal()">
+    <div class="modal-content">
+        <button class="close-modal" onclick="fecharQRModal()" title="Fechar"><i data-lucide="x" size="20"></i></button>
+        <h3 style="margin-top: 5px; margin-bottom: 10px; color: var(--primary-dark); font-weight: 800;">Aplicativo Mobile</h3>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 25px; line-height: 1.4;">
+            Escaneie o QR Code abaixo com a câmera do celular para baixar e instalar o aplicativo.
+        </p>
+        
+        <div style="background: white; padding: 15px; border-radius: 12px; border: 1px solid var(--border); display: inline-block;">
+            <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=https://luksmkt.github.io/baixarapks" alt="QR Code App" style="display: block; width: 180px; height: 180px;">
+        </div>
+    </div>
+</div>
+
 <script>
 // ═══════════════════════════════════════════════════════
-//  DADOS E LÓGICA (Aprimorada)
+//  DADOS E LÓGICA
 // ═══════════════════════════════════════════════════════
 const KEYS = { os:'sgt_os', est:'sgt_est', ven:'sgt_ven', ins:'sgt_ins' };
 
@@ -1012,13 +1072,33 @@ function cancelarEdicaoEstoque() {
   lucide.createIcons();
 }
 
+// Função para aumentar e diminuir o estoque direto na tabela
+function alterarQtdEstoque(index, valor) {
+    if(db.est[index].isServico) return;
+    db.est[index].qtd += valor;
+    if (db.est[index].qtd < 0) db.est[index].qtd = 0; // Impede estoque negativo
+    salvarAtualizar();
+}
+
 function renderEstoque() {
   const busca = (document.getElementById('buscaEst').value || '').toLowerCase();
+  const filtroTipo = document.getElementById('filtroEstTipo').value;
+  const filtroEstoque = document.getElementById('filtroEstEstoque').value;
   const tbody = document.getElementById('listaEst');
 
-  const filtrados = db.est.filter(p => p.nome.toLowerCase().includes(busca));
+  const filtrados = db.est.filter(p => {
+      const matchBusca = p.nome.toLowerCase().includes(busca);
+      const matchTipo = filtroTipo === '' || (filtroTipo === 'servico' ? p.isServico : !p.isServico);
+      let matchEst = true;
+      if (!p.isServico && filtroEstoque !== '') {
+          if (filtroEstoque === 'com_estoque') matchEst = p.qtd > 0;
+          if (filtroEstoque === 'sem_estoque') matchEst = p.qtd <= 0;
+      }
+      return matchBusca && matchTipo && matchEst;
+  });
+
   if (!filtrados.length) {
-    tbody.innerHTML = `<tr><td colspan="8" class="empty">Nenhum item cadastrado</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="empty">Nenhum item encontrado com esses filtros</td></tr>`;
     return;
   }
 
@@ -1026,15 +1106,20 @@ function renderEstoque() {
     const i = db.est.indexOf(p);
     const lucroUnit = p.venda - p.custo;
     const valEst = p.isServico ? null : (p.custo * (p.qtd || 0));
+    
     let qtdBadge;
     if (p.isServico) {
       qtdBadge = `<span class="badge badge-purple">Serviço ∞</span>`;
-    } else if (p.qtd <= 0) {
-      qtdBadge = `<span class="badge badge-red">Sem estoque</span>`;
-    } else if (p.qtd <= 2) {
-      qtdBadge = `<span class="badge badge-yellow">⚠ ${p.qtd} un.</span>`;
     } else {
-      qtdBadge = `<span class="badge badge-gray">${p.qtd} un.</span>`;
+      let badgeClass = p.qtd <= 0 ? 'badge-red' : (p.qtd <= 2 ? 'badge-yellow' : 'badge-gray');
+      let iconWarn = (p.qtd <= 2 && p.qtd > 0) ? '⚠ ' : '';
+      qtdBadge = `
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <button class="btn-qtd" onclick="alterarQtdEstoque(${i}, -1)" title="Diminuir Estoque"><i data-lucide="minus" size="14"></i></button>
+            <span class="badge ${badgeClass}">${iconWarn}${p.qtd} un.</span>
+            <button class="btn-qtd" onclick="alterarQtdEstoque(${i}, 1)" title="Adicionar Estoque"><i data-lucide="plus" size="14"></i></button>
+        </div>
+      `;
     }
 
     return `<tr>
@@ -1449,7 +1534,7 @@ function excluir(i, tipo) {
 }
 
 // ═══════════════════════════════════════════════════════
-//  BACKUP
+//  BACKUP E MODAL QR CODE
 // ═══════════════════════════════════════════════════════
 function exportarDados() {
   const blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
@@ -1482,6 +1567,15 @@ function importarDados() {
     reader.readAsText(e.target.files[0]);
   };
   input.click();
+}
+
+function abrirQRModal() {
+    document.getElementById('qrModal').classList.add('open');
+    lucide.createIcons();
+}
+
+function fecharQRModal() {
+    document.getElementById('qrModal').classList.remove('open');
 }
 
 function atualizarTudo() {
