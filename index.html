@@ -595,10 +595,10 @@
     </div>
 </div>
 
-<!-- INICIALIZAÇÃO FIREBASE VIA MÓDULO -->
+<!-- INICIALIZAÇÃO FIREBASE VIA MÓDULO (TEMPO REAL) -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-  import { getFirestore, collection, getDocs, setDoc, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+  import { getFirestore, collection, setDoc, doc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyAIotobZ1gPI2NWmQUklOVBeN-1x-UeaAc",
@@ -614,13 +614,15 @@
   // Disponibilizando as funções do Firebase no contexto global da janela
   window.dbFirestore = getFirestore(app);
   window.fs_collection = collection;
-  window.fs_getDocs = getDocs;
   window.fs_setDoc = setDoc;
   window.fs_doc = doc;
   window.fs_deleteDoc = deleteDoc;
+  window.fs_onSnapshot = onSnapshot;
 
-  // Ao finalizar a conexão, carrega os dados
-  window.carregarDadosDoFirebase();
+  // Inicia a escuta em tempo real (função definida no bloco abaixo)
+  if (window.iniciarEscutaEmTempoReal) {
+      window.iniciarEscutaEmTempoReal();
+  }
 </script>
 
 <script>
@@ -629,34 +631,36 @@
 // ═══════════════════════════════════════════════════════
 
 let db = { os: [], est: [], ven: [], ins: [] };
-
-// Variável Global para o Carrinho do PDV
 let carrinhoPDV = [];
-
-// Estado Global do Olho Ocultar Valores
 let valoresOcultos = false;
 
-// 1. CARREGAMENTO DOS DADOS (Chamado pelo módulo do Firebase)
-async function carregarDadosDoFirebase() {
-    try {
-        const [snapOS, snapEst, snapVen, snapIns] = await Promise.all([
-            window.fs_getDocs(window.fs_collection(window.dbFirestore, 'sgt_os')),
-            window.fs_getDocs(window.fs_collection(window.dbFirestore, 'sgt_est')),
-            window.fs_getDocs(window.fs_collection(window.dbFirestore, 'sgt_ven')),
-            window.fs_getDocs(window.fs_collection(window.dbFirestore, 'sgt_ins'))
-        ]);
-
-        db.os = snapOS.docs.map(d => d.data());
-        db.est = snapEst.docs.map(d => d.data());
-        db.ven = snapVen.docs.map(d => d.data());
-        db.ins = snapIns.docs.map(d => d.data());
-
+// 1. CARREGAMENTO DOS DADOS EM TEMPO REAL
+window.iniciarEscutaEmTempoReal = function() {
+    
+    // Escuta OS
+    window.fs_onSnapshot(window.fs_collection(window.dbFirestore, 'sgt_os'), (snapshot) => {
+        db.os = snapshot.docs.map(d => d.data());
         atualizarTudo();
-    } catch (erro) {
-        console.error("Falha ao carregar banco de dados do Firebase:", erro);
-        alert("Aviso: Erro de conexão. Verifique sua internet ou as Regras do Firestore.");
-    }
-}
+    }, (error) => console.error("Erro ao escutar OS:", error));
+
+    // Escuta Estoque
+    window.fs_onSnapshot(window.fs_collection(window.dbFirestore, 'sgt_est'), (snapshot) => {
+        db.est = snapshot.docs.map(d => d.data());
+        atualizarTudo();
+    }, (error) => console.error("Erro ao escutar Estoque:", error));
+
+    // Escuta Vendas
+    window.fs_onSnapshot(window.fs_collection(window.dbFirestore, 'sgt_ven'), (snapshot) => {
+        db.ven = snapshot.docs.map(d => d.data());
+        atualizarTudo();
+    }, (error) => console.error("Erro ao escutar Vendas:", error));
+
+    // Escuta Insumos
+    window.fs_onSnapshot(window.fs_collection(window.dbFirestore, 'sgt_ins'), (snapshot) => {
+        db.ins = snapshot.docs.map(d => d.data());
+        atualizarTudo();
+    }, (error) => console.error("Erro ao escutar Insumos:", error));
+};
 
 // 2. FUNÇÃO GENÉRICA PARA SALVAR (CRIAR/ATUALIZAR) UM DOCUMENTO ONLINE
 async function salvarNoFirebase(colecao, item) {
@@ -894,12 +898,8 @@ async function salvarOS() {
         idPeca:   document.getElementById('osPecaId').value,
     };
 
-    if (editOSIdx !== null) db.os[editOSIdx] = o;
-    else db.os.push(o);
-
     cancelarEdicaoOS();
     await salvarNoFirebase('sgt_os', o);
-    atualizarTudo();
 }
 
 function editarOS(i) {
@@ -975,7 +975,6 @@ async function mudarStatusOS(i, s) {
     }
     
     await salvarNoFirebase('sgt_os', o);
-    atualizarTudo();
 }
 
 function renderOS() {
@@ -1080,12 +1079,8 @@ async function salvarEstoque() {
         venda:   parseMoeda(document.getElementById('estVenda').value),
     };
 
-    if (editEstIdx !== null) db.est[editEstIdx] = item;
-    else db.est.push(item);
-
     cancelarEdicaoEstoque();
     await salvarNoFirebase('sgt_est', item);
-    atualizarTudo();
 }
 
 function editarEstoque(i) {
@@ -1122,7 +1117,6 @@ async function alterarQtdEstoque(index, valor) {
     if (db.est[index].qtd < 0) db.est[index].qtd = 0;
     
     await salvarNoFirebase('sgt_est', db.est[index]);
-    atualizarTudo();
 }
 
 function renderEstoque() {
@@ -1333,7 +1327,6 @@ async function realizarVenda() {
             lucro: lucroItem
         };
 
-        db.ven.push(novaVenda);
         await salvarNoFirebase('sgt_ven', novaVenda);
 
         if (!item.isServico) {
@@ -1349,7 +1342,6 @@ async function realizarVenda() {
     document.getElementById('vendaDescGlobal').value = '';
     document.getElementById('vendaCliente').value = 'Ao consumidor';
     renderCarrinho();
-    atualizarTudo();
     
     alert('Venda registrada com sucesso!');
 }
@@ -1406,12 +1398,8 @@ async function salvarInsumo() {
         valor: val,
     };
 
-    if (editInsIdx !== null) db.ins[editInsIdx] = ins;
-    else db.ins.push(ins);
-
     cancelarEdicaoInsumo();
     await salvarNoFirebase('sgt_ins', ins);
-    atualizarTudo();
 }
 
 function editarInsumo(i) {
@@ -1574,6 +1562,7 @@ async function excluir(i, tipo) {
                 await salvarNoFirebase('sgt_est', item);
             }
         }
+        cancelarEdicaoOS();
     } else if (tipo === 'ven') {
         const v = db.ven[i];
         const item = db.est.find(x => x.nome === v.produto);
@@ -1581,17 +1570,14 @@ async function excluir(i, tipo) {
             item.qtd += v.qtd;
             await salvarNoFirebase('sgt_est', item);
         }
+    } else if (tipo === 'est') {
+        cancelarEdicaoEstoque();
+    } else if (tipo === 'ins') {
+        cancelarEdicaoInsumo();
     }
 
     try {
         await window.fs_deleteDoc(window.fs_doc(window.dbFirestore, colecao, idDoc.toString()));
-        db[tipo].splice(i, 1);
-        
-        if (tipo === 'os') cancelarEdicaoOS();
-        if (tipo === 'est') cancelarEdicaoEstoque();
-        if (tipo === 'ins') cancelarEdicaoInsumo();
-        
-        atualizarTudo();
     } catch (error) {
         console.error("Erro ao excluir:", error);
     }
@@ -1618,20 +1604,19 @@ function importarDados() {
         reader.onload = async re => {
             try {
                 const c = JSON.parse(re.target.result);
-                db.os  = c.os  || [];
-                db.est = c.est || c.estoque || [];
-                db.ven = c.ven || c.vendas  || [];
-                db.ins = c.ins || c.insumos || [];
+                const importOs  = c.os  || [];
+                const importEst = c.est || c.estoque || [];
+                const importVen = c.ven || c.vendas  || [];
+                const importIns = c.ins || c.insumos || [];
                 
                 alert('Restaurando os dados para a Nuvem. Por favor, aguarde alguns segundos...');
                 
-                // Repassando os backups para a nuvem
-                for (let o of db.os) await salvarNoFirebase('sgt_os', o);
-                for (let e of db.est) await salvarNoFirebase('sgt_est', e);
-                for (let v of db.ven) await salvarNoFirebase('sgt_ven', v);
-                for (let i of db.ins) await salvarNoFirebase('sgt_ins', i);
+                // Repassando os backups para a nuvem (o onSnapshot fará a tela atualizar)
+                for (let o of importOs) await salvarNoFirebase('sgt_os', o);
+                for (let e of importEst) await salvarNoFirebase('sgt_est', e);
+                for (let v of importVen) await salvarNoFirebase('sgt_ven', v);
+                for (let i of importIns) await salvarNoFirebase('sgt_ins', i);
 
-                atualizarTudo();
                 alert('Todos os dados foram restaurados para o banco de dados online com sucesso!');
             } catch(err) {
                 alert('Arquivo inválido ou corrompido.');
@@ -1661,9 +1646,7 @@ function atualizarTudo() {
     atualizarDashboard();
 }
 
-// Inicializa a página e desenha os ícones da barra lateral
 lucide.createIcons();
-// A renderização das listas aguardará a carga dos dados do Firebase (chamada no bloco module).
 atualizarTudo();
 </script>
 </body>
