@@ -635,35 +635,39 @@ let db = { os: [], est: [], ven: [], ins: [] };
 let carrinhoPDV = [];
 let valoresOcultos = false;
 
-// 1. CARREGAMENTO DOS DADOS EM TEMPO REAL
+// 1. CARREGAMENTO DOS DADOS EM TEMPO REAL E ORDENAÇÃO
 window.iniciarEscutaEmTempoReal = function() {
     
-    // Escuta OS
+    // Escuta OS e ordena por data
     window.fs_onSnapshot(window.fs_collection(window.dbFirestore, 'sgt_os'), (snapshot) => {
         db.os = snapshot.docs.map(d => d.data());
+        db.os.sort((a, b) => (b.data || '').localeCompare(a.data || ''));
         atualizarTudo();
     }, (error) => console.error("Erro ao escutar OS:", error));
 
-    // Escuta Estoque
+    // Escuta Estoque e ordena por ordem alfabética
     window.fs_onSnapshot(window.fs_collection(window.dbFirestore, 'sgt_est'), (snapshot) => {
         db.est = snapshot.docs.map(d => d.data());
+        db.est.sort((a, b) => (a.nome || '').localeCompare(b.nome || ''));
         atualizarTudo();
     }, (error) => console.error("Erro ao escutar Estoque:", error));
 
-    // Escuta Vendas
+    // Escuta Vendas e ordena por data
     window.fs_onSnapshot(window.fs_collection(window.dbFirestore, 'sgt_ven'), (snapshot) => {
         db.ven = snapshot.docs.map(d => d.data());
+        db.ven.sort((a, b) => (b.data || '').localeCompare(a.data || ''));
         atualizarTudo();
     }, (error) => console.error("Erro ao escutar Vendas:", error));
 
-    // Escuta Insumos
+    // Escuta Insumos e ordena por data
     window.fs_onSnapshot(window.fs_collection(window.dbFirestore, 'sgt_ins'), (snapshot) => {
         db.ins = snapshot.docs.map(d => d.data());
+        db.ins.sort((a, b) => (b.data || '').localeCompare(a.data || ''));
         atualizarTudo();
     }, (error) => console.error("Erro ao escutar Insumos:", error));
 };
 
-// 2. FUNÇÃO GENÉRICA PARA SALVAR (CRIAR/ATUALIZAR) UM DOCUMENTO ONLINE
+// 2. FUNÇÃO GENÉRICA PARA SALVAR (CRIAR/ATUALIZAR) UM DOCUMENTO ONLINE COM PROTEÇÃO DE ID
 async function salvarNoFirebase(colecao, item) {
     try {
         if (!item.id) {
@@ -1619,10 +1623,12 @@ function importarDados() {
         reader.onload = async re => {
             try {
                 const c = JSON.parse(re.target.result);
-                const importOs  = c.os  || [];
-                const importEst = c.est || c.estoque || [];
-                const importVen = c.ven || c.vendas  || [];
-                const importIns = c.ins || c.insumos || [];
+                
+                // Mapeamento compatível com versões antigas (ex: sgt_v5_os)
+                const importOs  = c.os  || c.sgt_os  || c.sgt_v5_os  || [];
+                const importEst = c.est || c.estoque || c.sgt_est || c.sgt_v5_est || [];
+                const importVen = c.ven || c.vendas  || c.sgt_ven || c.sgt_v5_ven || [];
+                const importIns = c.ins || c.insumos || c.sgt_ins || c.sgt_v5_in  || [];
                 
                 alert('Iniciando a substituição dos dados na Nuvem. Por favor, aguarde alguns segundos e não feche a página...');
                 
