@@ -598,7 +598,7 @@
 <!-- INICIALIZAÇÃO FIREBASE VIA MÓDULO (TEMPO REAL) -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-  import { getFirestore, collection, setDoc, doc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+  import { getFirestore, collection, setDoc, doc, deleteDoc, onSnapshot, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyAIotobZ1gPI2NWmQUklOVBeN-1x-UeaAc",
@@ -618,6 +618,7 @@
   window.fs_doc = doc;
   window.fs_deleteDoc = deleteDoc;
   window.fs_onSnapshot = onSnapshot;
+  window.fs_getDocs = getDocs;
 
   // Inicia a escuta em tempo real (função definida no bloco abaixo)
   if (window.iniciarEscutaEmTempoReal) {
@@ -665,6 +666,9 @@ window.iniciarEscutaEmTempoReal = function() {
 // 2. FUNÇÃO GENÉRICA PARA SALVAR (CRIAR/ATUALIZAR) UM DOCUMENTO ONLINE
 async function salvarNoFirebase(colecao, item) {
     try {
+        if (!item.id) {
+            item.id = uid();
+        }
         await window.fs_setDoc(window.fs_doc(window.dbFirestore, colecao, item.id.toString()), item);
     } catch (e) {
         console.error(`Erro ao salvar no Firebase (${colecao}):`, e);
@@ -1584,7 +1588,7 @@ async function excluir(i, tipo) {
 }
 
 // ═══════════════════════════════════════════════════════
-//  BACKUP / RESTAURAR DADOS PARA NUVEM E MODAL
+//  BACKUP / RESTAURAR DADOS PARA NUVEM (SUBSTITUIÇÃO COMPLETA)
 // ═══════════════════════════════════════════════════════
 function exportarDados() {
     const blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
@@ -1593,6 +1597,17 @@ function exportarDados() {
     a.download = `SGTPro_Backup_Nuvem_${hoje()}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
+}
+
+// Função auxiliar para deletar todos os documentos de uma coleção antes de importar
+async function limparColecao(colecao) {
+    try {
+        const snapshot = await window.fs_getDocs(window.fs_collection(window.dbFirestore, colecao));
+        const promessasDelete = snapshot.docs.map(d => window.fs_deleteDoc(window.fs_doc(window.dbFirestore, colecao, d.id)));
+        await Promise.all(promessasDelete);
+    } catch (e) {
+        console.error(`Erro ao limpar a coleção ${colecao}:`, e);
+    }
 }
 
 function importarDados() {
@@ -1609,15 +1624,27 @@ function importarDados() {
                 const importVen = c.ven || c.vendas  || [];
                 const importIns = c.ins || c.insumos || [];
                 
-                alert('Restaurando os dados para a Nuvem. Por favor, aguarde alguns segundos...');
+                alert('Iniciando a substituição dos dados na Nuvem. Por favor, aguarde alguns segundos e não feche a página...');
                 
-                // Repassando os backups para a nuvem (o onSnapshot fará a tela atualizar)
-                for (let o of importOs) await salvarNoFirebase('sgt_os', o);
-                for (let e of importEst) await salvarNoFirebase('sgt_est', e);
-                for (let v of importVen) await salvarNoFirebase('sgt_ven', v);
-                for (let i of importIns) await salvarNoFirebase('sgt_ins', i);
+                // 1. Limpa completamente o banco de dados online atual
+                await Promise.all([
+                    limparColecao('sgt_os'),
+                    limparColecao('sgt_est'),
+                    limparColecao('sgt_ven'),
+                    limparColecao('sgt_ins')
+                ]);
 
-                alert('Todos os dados foram restaurados para o banco de dados online com sucesso!');
+                // 2. Envia os novos dados (o onSnapshot fará a tela atualizar sozinha assim que entrarem)
+                const promessasDeEnvio = [];
+                importOs.forEach(o => promessasDeEnvio.push(salvarNoFirebase('sgt_os', o)));
+                importEst.forEach(e => promessasDeEnvio.push(salvarNoFirebase('sgt_est', e)));
+                importVen.forEach(v => promessasDeEnvio.push(salvarNoFirebase('sgt_ven', v)));
+                importIns.forEach(i => promessasDeEnvio.push(salvarNoFirebase('sgt_ins', i)));
+
+                // Aguarda o término de todo o upload
+                await Promise.all(promessasDeEnvio);
+
+                alert('Todos os dados antigos foram substituídos pelo backup com sucesso!');
             } catch(err) {
                 alert('Arquivo inválido ou corrompido.');
                 console.error(err);
@@ -1646,7 +1673,9 @@ function atualizarTudo() {
     atualizarDashboard();
 }
 
+// Inicializa a página e desenha os ícones da barra lateral
 lucide.createIcons();
+// A renderização aguardará o carregamento online
 atualizarTudo();
 </script>
 </body>
