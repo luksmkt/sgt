@@ -595,18 +595,40 @@
     </div>
 </div>
 
+<!-- INICIALIZAÇÃO FIREBASE VIA MÓDULO -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+  import { getFirestore, collection, getDocs, setDoc, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyAIotobZ1gPI2NWmQUklOVBeN-1x-UeaAc",
+    authDomain: "sgt-pro-6baf7.firebaseapp.com",
+    projectId: "sgt-pro-6baf7",
+    storageBucket: "sgt-pro-6baf7.firebasestorage.app",
+    messagingSenderId: "62746693428",
+    appId: "1:62746693428:web:074f0a2b39f5d12d175f61"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  
+  // Disponibilizando as funções do Firebase no contexto global da janela
+  window.dbFirestore = getFirestore(app);
+  window.fs_collection = collection;
+  window.fs_getDocs = getDocs;
+  window.fs_setDoc = setDoc;
+  window.fs_doc = doc;
+  window.fs_deleteDoc = deleteDoc;
+
+  // Ao finalizar a conexão, carrega os dados
+  window.carregarDadosDoFirebase();
+</script>
+
 <script>
 // ═══════════════════════════════════════════════════════
-//  DADOS E LÓGICA
+//  DADOS E LÓGICA (BASEADOS NO CLOUD FIRESTORE)
 // ═══════════════════════════════════════════════════════
-const KEYS = { os:'sgt_os', est:'sgt_est', ven:'sgt_ven', ins:'sgt_ins' };
 
-let db = {
-  os:  JSON.parse(localStorage.getItem(KEYS.os))  || [],
-  est: JSON.parse(localStorage.getItem(KEYS.est)) || [],
-  ven: JSON.parse(localStorage.getItem(KEYS.ven)) || [],
-  ins: JSON.parse(localStorage.getItem(KEYS.ins)) || [],
-};
+let db = { os: [], est: [], ven: [], ins: [] };
 
 // Variável Global para o Carrinho do PDV
 let carrinhoPDV = [];
@@ -614,63 +636,75 @@ let carrinhoPDV = [];
 // Estado Global do Olho Ocultar Valores
 let valoresOcultos = false;
 
-// Migração de dados antigos
-(function migrar() {
-  const v5keys = { sgt_v5_os:'os', sgt_v5_est:'est', sgt_v5_ven:'ven', sgt_v5_in:'ins' };
-  let migrou = false;
-  for (const [k, t] of Object.entries(v5keys)) {
-    const raw = localStorage.getItem(k);
-    if (raw && !db[t].length) {
-      try { db[t] = JSON.parse(raw); migrou = true; } catch(e) {}
-    }
-  }
-  if (migrou) salvar();
-})();
+// 1. CARREGAMENTO DOS DADOS (Chamado pelo módulo do Firebase)
+async function carregarDadosDoFirebase() {
+    try {
+        const [snapOS, snapEst, snapVen, snapIns] = await Promise.all([
+            window.fs_getDocs(window.fs_collection(window.dbFirestore, 'sgt_os')),
+            window.fs_getDocs(window.fs_collection(window.dbFirestore, 'sgt_est')),
+            window.fs_getDocs(window.fs_collection(window.dbFirestore, 'sgt_ven')),
+            window.fs_getDocs(window.fs_collection(window.dbFirestore, 'sgt_ins'))
+        ]);
 
-function salvar() {
-  for (const [t, key] of Object.entries(KEYS)) localStorage.setItem(key, JSON.stringify(db[t]));
+        db.os = snapOS.docs.map(d => d.data());
+        db.est = snapEst.docs.map(d => d.data());
+        db.ven = snapVen.docs.map(d => d.data());
+        db.ins = snapIns.docs.map(d => d.data());
+
+        atualizarTudo();
+    } catch (erro) {
+        console.error("Falha ao carregar banco de dados do Firebase:", erro);
+        alert("Aviso: Erro de conexão. Verifique sua internet ou as Regras do Firestore.");
+    }
 }
 
-function salvarAtualizar() { salvar(); atualizarTudo(); }
+// 2. FUNÇÃO GENÉRICA PARA SALVAR (CRIAR/ATUALIZAR) UM DOCUMENTO ONLINE
+async function salvarNoFirebase(colecao, item) {
+    try {
+        await window.fs_setDoc(window.fs_doc(window.dbFirestore, colecao, item.id.toString()), item);
+    } catch (e) {
+        console.error(`Erro ao salvar no Firebase (${colecao}):`, e);
+    }
+}
 
 // ═══════════════════════════════════════════════════════
 //  UTILITÁRIOS
 // ═══════════════════════════════════════════════════════
 function mascaraMoeda(el) {
-  let v = el.value.replace(/\D/g, '') || '0';
-  v = (parseInt(v) / 100).toFixed(2).replace('.', ',').replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1.');
-  el.value = 'R$ ' + v;
+    let v = el.value.replace(/\D/g, '') || '0';
+    v = (parseInt(v) / 100).toFixed(2).replace('.', ',').replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1.');
+    el.value = 'R$ ' + v;
 }
 
 function parseMoeda(s) {
-  if (!s) return 0;
-  if (typeof s === 'number') return s;
-  return parseFloat(s.replace(/[^\d,]/g, '').replace(',', '.')) || 0;
+    if (!s) return 0;
+    if (typeof s === 'number') return s;
+    return parseFloat(s.replace(/[^\d,]/g, '').replace(',', '.')) || 0;
 }
 
 function fmtMoeda(v) {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
 }
 
 function fmtData(dt) {
-  if (!dt) return '—';
-  const [y, m, d] = dt.split('-');
-  return `${d}/${m}/${y}`;
+    if (!dt) return '—';
+    const [y, m, d] = dt.split('-');
+    return `${d}/${m}/${y}`;
 }
 
 function toInput(v) {
-  if (!v && v !== 0) return '';
-  const n = parseFloat(v).toFixed(2).replace('.', ',').replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1.');
-  return 'R$ ' + n;
+    if (!v && v !== 0) return '';
+    const n = parseFloat(v).toFixed(2).replace('.', ',').replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1.');
+    return 'R$ ' + n;
 }
 
 function hoje() { return new Date().toISOString().split('T')[0]; }
 function uid() { return Date.now() + Math.random().toString(36).slice(2, 7); }
 
 function dentroFiltro(dt) {
-  const ini = document.getElementById('dataInicio').value;
-  const fim = document.getElementById('dataFim').value;
-  return (!ini || dt >= ini) && (!fim || dt <= fim);
+    const ini = document.getElementById('dataInicio').value;
+    const fim = document.getElementById('dataFim').value;
+    return (!ini || dt >= ini) && (!fim || dt <= fim);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -678,56 +712,56 @@ function dentroFiltro(dt) {
 // ═══════════════════════════════════════════════════════
 let ticking = false;
 window.addEventListener('scroll', () => {
-  if (!ticking) {
-    requestAnimationFrame(() => {
-      document.body.classList.toggle('scrolled', window.scrollY > 55);
-      ticking = false;
-    });
-    ticking = true;
-  }
+    if (!ticking) {
+        requestAnimationFrame(() => {
+            document.body.classList.toggle('scrolled', window.scrollY > 55);
+            ticking = false;
+        });
+        ticking = true;
+    }
 }, { passive: true });
 
 function toggleSidebar() {
-  document.getElementById('sidebar').classList.toggle('collapsed');
-  document.getElementById('main-content').classList.toggle('collapsed');
+    document.getElementById('sidebar').classList.toggle('collapsed');
+    document.getElementById('main-content').classList.toggle('collapsed');
 }
 
 function showTab(id) {
-  document.querySelectorAll('.tab').forEach(s => s.classList.remove('active'));
-  document.querySelectorAll('.nav-links button').forEach(b => b.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-  document.getElementById('nav-' + id).classList.add('active');
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-  atualizarTudo();
+    document.querySelectorAll('.tab').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.nav-links button').forEach(b => b.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    document.getElementById('nav-' + id).classList.add('active');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    atualizarTudo();
 }
 
 // ═══════════════════════════════════════════════════════
 //  FILTROS DE DATA E FUNÇÃO OCULTAR
 // ═══════════════════════════════════════════════════════
 function filtrarMesAno() {
-  const mes = document.getElementById('mesFiltro').value;
-  const ano = document.getElementById('anoFiltro').value;
-  if (!ano) { atualizarTudo(); return; }
-  const m = mes !== '' ? parseInt(mes) : null;
-  const ini = m !== null ? new Date(ano, m, 1) : new Date(ano, 0, 1);
-  const fim = m !== null ? new Date(ano, m + 1, 0) : new Date(ano, 11, 31);
-  document.getElementById('dataInicio').value = ini.toISOString().split('T')[0];
-  document.getElementById('dataFim').value = fim.toISOString().split('T')[0];
-  atualizarTudo();
+    const mes = document.getElementById('mesFiltro').value;
+    const ano = document.getElementById('anoFiltro').value;
+    if (!ano) { atualizarTudo(); return; }
+    const m = mes !== '' ? parseInt(mes) : null;
+    const ini = m !== null ? new Date(ano, m, 1) : new Date(ano, 0, 1);
+    const fim = m !== null ? new Date(ano, m + 1, 0) : new Date(ano, 11, 31);
+    document.getElementById('dataInicio').value = ini.toISOString().split('T')[0];
+    document.getElementById('dataFim').value = fim.toISOString().split('T')[0];
+    atualizarTudo();
 }
 
 function filtrarRange() {
-  document.getElementById('mesFiltro').value = '';
-  document.getElementById('anoFiltro').value = '';
-  atualizarTudo();
+    document.getElementById('mesFiltro').value = '';
+    document.getElementById('anoFiltro').value = '';
+    atualizarTudo();
 }
 
 function limparFiltros() {
-  document.getElementById('mesFiltro').value = '';
-  document.getElementById('anoFiltro').value = '';
-  document.getElementById('dataInicio').value = '';
-  document.getElementById('dataFim').value = '';
-  atualizarTudo();
+    document.getElementById('mesFiltro').value = '';
+    document.getElementById('anoFiltro').value = '';
+    document.getElementById('dataInicio').value = '';
+    document.getElementById('dataFim').value = '';
+    atualizarTudo();
 }
 
 function toggleValores() {
@@ -746,18 +780,18 @@ function toggleValores() {
 }
 
 (function() {
-  const n = new Date();
-  document.getElementById('mesFiltro').value = n.getMonth();
-  document.getElementById('anoFiltro').value = n.getFullYear();
-  document.getElementById('osData').value = hoje();
-  document.getElementById('inData').value = hoje();
-  filtrarMesAno();
+    const n = new Date();
+    document.getElementById('mesFiltro').value = n.getMonth();
+    document.getElementById('anoFiltro').value = n.getFullYear();
+    document.getElementById('osData').value = hoje();
+    document.getElementById('inData').value = hoje();
+    filtrarMesAno();
 })();
 
 document.addEventListener('click', e => {
-  if (!e.target.closest('.autocomplete-container')) {
-    document.querySelectorAll('.autocomplete-list').forEach(l => l.classList.remove('open'));
-  }
+    if (!e.target.closest('.autocomplete-container')) {
+        document.querySelectorAll('.autocomplete-list').forEach(l => l.classList.remove('open'));
+    }
 });
 
 // ═══════════════════════════════════════════════════════
@@ -786,135 +820,136 @@ function filtrarPecasOS(el) {
 }
 
 function selecionarPecaOS(id) {
-  const p = db.est.find(x => x.id == id);
-  if (!p) return;
-  document.getElementById('osPecaId').value = p.id;
-  document.getElementById('osBuscaPeca').value = p.nome;
-  document.getElementById('osCustoPeca').value = toInput(p.custo);
-  document.getElementById('osAcList').classList.remove('open');
-  
-  document.getElementById('btnLimparPecaOS').style.display = 'block';
-  const info = document.getElementById('osPecaInfo');
-  info.style.display = 'block';
-  info.innerHTML = `<span class="badge badge-blue">${p.nome}</span> <span style="color:var(--success); margin-left:10px;">✔ Vinculado à OS</span>`;
+    const p = db.est.find(x => x.id == id);
+    if (!p) return;
+    document.getElementById('osPecaId').value = p.id;
+    document.getElementById('osBuscaPeca').value = p.nome;
+    document.getElementById('osCustoPeca').value = toInput(p.custo);
+    document.getElementById('osAcList').classList.remove('open');
+    
+    document.getElementById('btnLimparPecaOS').style.display = 'block';
+    const info = document.getElementById('osPecaInfo');
+    info.style.display = 'block';
+    info.innerHTML = `<span class="badge badge-blue">${p.nome}</span> <span style="color:var(--success); margin-left:10px;">✔ Vinculado à OS</span>`;
 
-  recalcOS();
+    recalcOS();
 }
 
 function limparPecaOS() {
-  document.getElementById('osPecaId').value = '';
-  document.getElementById('osBuscaPeca').value = '';
-  document.getElementById('osCustoPeca').value = '';
-  document.getElementById('osPecaInfo').style.display = 'none';
-  document.getElementById('btnLimparPecaOS').style.display = 'none';
-  recalcOS();
+    document.getElementById('osPecaId').value = '';
+    document.getElementById('osBuscaPeca').value = '';
+    document.getElementById('osCustoPeca').value = '';
+    document.getElementById('osPecaInfo').style.display = 'none';
+    document.getElementById('btnLimparPecaOS').style.display = 'none';
+    recalcOS();
 }
 
 function recalcOS() {
-  const custo = parseMoeda(document.getElementById('osCustoPeca').value);
-  const mao   = parseMoeda(document.getElementById('osMao').value);
-  const total = custo + mao;
-  document.getElementById('osTotal').value = toInput(total);
-  atualizarMargemOS(custo, total);
+    const custo = parseMoeda(document.getElementById('osCustoPeca').value);
+    const mao   = parseMoeda(document.getElementById('osMao').value);
+    const total = custo + mao;
+    document.getElementById('osTotal').value = toInput(total);
+    atualizarMargemOS(custo, total);
 }
 
 function recalcOSFromTotal() {
-  const total = parseMoeda(document.getElementById('osTotal').value);
-  const custo = parseMoeda(document.getElementById('osCustoPeca').value);
-  const mao   = Math.max(0, total - custo);
-  document.getElementById('osMao').value = toInput(mao);
-  atualizarMargemOS(custo, total);
+    const total = parseMoeda(document.getElementById('osTotal').value);
+    const custo = parseMoeda(document.getElementById('osCustoPeca').value);
+    const mao   = Math.max(0, total - custo);
+    document.getElementById('osMao').value = toInput(mao);
+    atualizarMargemOS(custo, total);
 }
 
 function atualizarMargemOS(custo, total) {
-  const lucro = total - custo;
-  const campo = document.getElementById('osMargem');
-  if (total > 0) {
-    const pct = custo > 0 ? ((lucro / custo) * 100).toFixed(1) + '%' : '100%';
-    campo.value = `${fmtMoeda(lucro)} (${pct})`;
-    campo.style.color = lucro >= 0 ? 'var(--success)' : 'var(--danger)';
-  } else {
-    campo.value = '';
-    campo.style.color = 'var(--text-main)';
-  }
+    const lucro = total - custo;
+    const campo = document.getElementById('osMargem');
+    if (total > 0) {
+        const pct = custo > 0 ? ((lucro / custo) * 100).toFixed(1) + '%' : '100%';
+        campo.value = `${fmtMoeda(lucro)} (${pct})`;
+        campo.style.color = lucro >= 0 ? 'var(--success)' : 'var(--danger)';
+    } else {
+        campo.value = '';
+        campo.style.color = 'var(--text-main)';
+    }
 }
 
-function salvarOS() {
-  const cliente = document.getElementById('osCliente').value.trim();
-  if (!cliente) { alert('Nome do cliente é obrigatório!'); return; }
+async function salvarOS() {
+    const cliente = document.getElementById('osCliente').value.trim();
+    if (!cliente) { alert('Nome do cliente é obrigatório!'); return; }
 
-  const custoPeca = parseMoeda(document.getElementById('osCustoPeca').value);
-  const mao       = parseMoeda(document.getElementById('osMao').value);
-  const total     = parseMoeda(document.getElementById('osTotal').value);
+    const custoPeca = parseMoeda(document.getElementById('osCustoPeca').value);
+    const mao       = parseMoeda(document.getElementById('osMao').value);
+    const total     = parseMoeda(document.getElementById('osTotal').value);
 
-  const o = {
-    id:       editOSIdx !== null ? db.os[editOSIdx].id : uid(),
-    data:     document.getElementById('osData').value || hoje(),
-    cliente,
-    modelo:   document.getElementById('osModelo').value.trim(),
-    defeito:  document.getElementById('osDefeito').value.trim(),
-    custoPeca, 
-    mao,         
-    total,       
-    status:   editOSIdx !== null ? db.os[editOSIdx].status : 'Andamento',
-    idPeca:   document.getElementById('osPecaId').value,
-  };
+    const o = {
+        id:       editOSIdx !== null ? db.os[editOSIdx].id : uid(),
+        data:     document.getElementById('osData').value || hoje(),
+        cliente,
+        modelo:   document.getElementById('osModelo').value.trim(),
+        defeito:  document.getElementById('osDefeito').value.trim(),
+        custoPeca, 
+        mao,         
+        total,       
+        status:   editOSIdx !== null ? db.os[editOSIdx].status : 'Andamento',
+        idPeca:   document.getElementById('osPecaId').value,
+    };
 
-  if (editOSIdx !== null) db.os[editOSIdx] = o;
-  else db.os.push(o);
+    if (editOSIdx !== null) db.os[editOSIdx] = o;
+    else db.os.push(o);
 
-  cancelarEdicaoOS();
-  salvarAtualizar();
+    cancelarEdicaoOS();
+    await salvarNoFirebase('sgt_os', o);
+    atualizarTudo();
 }
 
 function editarOS(i) {
-  editOSIdx = i;
-  const o = db.os[i];
-  document.getElementById('osData').value    = o.data;
-  document.getElementById('osCliente').value = o.cliente;
-  document.getElementById('osModelo').value  = o.modelo;
-  document.getElementById('osDefeito').value = o.defeito;
-  document.getElementById('osCustoPeca').value = toInput(o.custoPeca ?? o.pecas ?? 0);
-  document.getElementById('osMao').value     = toInput(o.mao);
-  document.getElementById('osTotal').value   = toInput(o.total ?? (o.custoPeca ?? o.pecas ?? 0) + o.mao);
-  
-  if (o.idPeca) {
-    const p = db.est.find(x => x.id == o.idPeca);
-    document.getElementById('osPecaId').value = o.idPeca;
-    if (p) {
-        document.getElementById('osBuscaPeca').value = p.nome;
-        document.getElementById('btnLimparPecaOS').style.display = 'block';
-        const info = document.getElementById('osPecaInfo');
-        info.style.display = 'block';
-        info.innerHTML = `<span class="badge badge-blue">${p.nome}</span> <span style="color:var(--success); margin-left:10px;">✔ Vinculado à OS</span>`;
+    editOSIdx = i;
+    const o = db.os[i];
+    document.getElementById('osData').value    = o.data;
+    document.getElementById('osCliente').value = o.cliente;
+    document.getElementById('osModelo').value  = o.modelo;
+    document.getElementById('osDefeito').value = o.defeito;
+    document.getElementById('osCustoPeca').value = toInput(o.custoPeca ?? o.pecas ?? 0);
+    document.getElementById('osMao').value     = toInput(o.mao);
+    document.getElementById('osTotal').value   = toInput(o.total ?? (o.custoPeca ?? o.pecas ?? 0) + o.mao);
+    
+    if (o.idPeca) {
+        const p = db.est.find(x => x.id == o.idPeca);
+        document.getElementById('osPecaId').value = o.idPeca;
+        if (p) {
+            document.getElementById('osBuscaPeca').value = p.nome;
+            document.getElementById('btnLimparPecaOS').style.display = 'block';
+            const info = document.getElementById('osPecaInfo');
+            info.style.display = 'block';
+            info.innerHTML = `<span class="badge badge-blue">${p.nome}</span> <span style="color:var(--success); margin-left:10px;">✔ Vinculado à OS</span>`;
+        }
+    } else {
+        limparPecaOS();
     }
-  } else {
-    limparPecaOS();
-  }
-  
-  recalcOSFromTotal();
-  document.getElementById('osFormTitle').textContent = 'Editar Ordem de Serviço';
-  document.getElementById('btnSalvarOS').innerHTML = '<i data-lucide="check"></i> Atualizar OS';
-  document.getElementById('btnCancelOS').style.display = 'inline-flex';
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-  lucide.createIcons();
+    
+    recalcOSFromTotal();
+    document.getElementById('osFormTitle').textContent = 'Editar Ordem de Serviço';
+    document.getElementById('btnSalvarOS').innerHTML = '<i data-lucide="check"></i> Atualizar OS';
+    document.getElementById('btnCancelOS').style.display = 'inline-flex';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    lucide.createIcons();
 }
 
 function cancelarEdicaoOS() {
-  editOSIdx = null;
-  limparPecaOS();
-  ['osCliente','osModelo','osDefeito','osMao','osTotal','osMargem'].forEach(id => {
-    document.getElementById(id).value = '';
-    document.getElementById(id).style.color = '';
-  });
-  document.getElementById('osData').value = hoje();
-  document.getElementById('osFormTitle').textContent = 'Nova Ordem de Serviço';
-  document.getElementById('btnSalvarOS').innerHTML = '<i data-lucide="check-circle"></i> Salvar OS';
-  document.getElementById('btnCancelOS').style.display = 'none';
-  lucide.createIcons();
+    editOSIdx = null;
+    limparPecaOS();
+    ['osCliente','osModelo','osDefeito','osMao','osTotal','osMargem'].forEach(id => {
+        document.getElementById(id).value = '';
+        document.getElementById(id).style.color = '';
+    });
+    document.getElementById('osData').value = hoje();
+    document.getElementById('osFormTitle').textContent = 'Nova Ordem de Serviço';
+    document.getElementById('btnSalvarOS').innerHTML = '<i data-lucide="check-circle"></i> Salvar OS';
+    document.getElementById('btnCancelOS').style.display = 'none';
+    lucide.createIcons();
 }
 
-function mudarStatusOS(i, s) {
+async function mudarStatusOS(i, s) {
     const o = db.os[i];
     const ant = o.status;
     o.status = s;
@@ -924,80 +959,88 @@ function mudarStatusOS(i, s) {
     if (o.idPeca) {
         const item = db.est.find(x => x.id == o.idPeca);
         if (item && !item.isServico) {
+            let alterarEstoque = false;
             if (!isFinalizado(ant) && isFinalizado(s)) {
-                if (item.qtd > 0) item.qtd--;
+                if (item.qtd > 0) {
+                    item.qtd--;
+                    alterarEstoque = true;
+                }
             }
             else if (isFinalizado(ant) && !isFinalizado(s)) {
                 item.qtd++;
+                alterarEstoque = true;
             }
+            if (alterarEstoque) await salvarNoFirebase('sgt_est', item);
         }
     }
-    salvarAtualizar();
+    
+    await salvarNoFirebase('sgt_os', o);
+    atualizarTudo();
 }
 
 function renderOS() {
-  const busca = (document.getElementById('buscaOS').value || '').toLowerCase();
-  const tbody = document.getElementById('listaOS');
+    const busca = (document.getElementById('buscaOS').value || '').toLowerCase();
+    const tbody = document.getElementById('listaOS');
 
-  const filtrados = db.os.filter(o => dentroFiltro(o.data) && (o.cliente.toLowerCase().includes(busca) || (o.modelo || '').toLowerCase().includes(busca)));
+    const filtrados = db.os.filter(o => dentroFiltro(o.data) && (o.cliente.toLowerCase().includes(busca) || (o.modelo || '').toLowerCase().includes(busca)));
 
-  if (!filtrados.length) {
-    tbody.innerHTML = `<tr><td colspan="9" class="empty">Nenhuma ordem encontrada para o período</td></tr>`;
-    return;
-  }
+    if (!filtrados.length) {
+        tbody.innerHTML = `<tr><td colspan="9" class="empty">Nenhuma ordem encontrada para o período</td></tr>`;
+        return;
+    }
 
-  tbody.innerHTML = filtrados.map((o) => {
-    const idx = db.os.indexOf(o);
-    const custo = o.custoPeca ?? o.pecas ?? 0;
-    const total = o.total ?? (custo + o.mao);
-    const lucro = total - custo;
-    const lucroCor = lucro >= 0 ? 'var(--success)' : 'var(--danger)';
+    tbody.innerHTML = filtrados.map((o) => {
+        const idx = db.os.indexOf(o);
+        const custo = o.custoPeca ?? o.pecas ?? 0;
+        const total = o.total ?? (custo + o.mao);
+        const lucro = total - custo;
+        const lucroCor = lucro >= 0 ? 'var(--success)' : 'var(--danger)';
 
-    return `<tr>
-      <td style="font-size:0.85rem; color:var(--text-muted);">${fmtData(o.data)}</td>
-      <td>
-        <div style="font-weight:800; color:var(--primary-dark);">${o.cliente}</div>
-        <div style="font-size:0.8rem; color:var(--text-muted);">${o.modelo || '—'}</div>
-      </td>
-      <td><div style="max-width:200px; font-size:0.85rem; color:var(--text-muted); line-height:1.2">${o.defeito || '—'}</div></td>
-      <td style="color:var(--danger); font-weight:600">${fmtMoeda(custo)}</td>
-      <td style="color:var(--success); font-weight:600">${fmtMoeda(o.mao)}</td>
-      <td style="font-weight:800">${fmtMoeda(total)}</td>
-      <td style="color:${lucroCor}; font-weight:700">${fmtMoeda(lucro)}</td>
-      <td>
-        <select class="badge status-${o.status.replace(/\s/g,'')}" onchange="mudarStatusOS(${idx},this.value)">
-          <option ${o.status==='Andamento'?'selected':''}>Andamento</option>
-          <option ${o.status==='Pronta'?'selected':''}>Pronta</option>
-          <option ${o.status==='Entregue'?'selected':''}>Entregue</option>
-          <option ${o.status==='Cancelado'?'selected':''}>Cancelado</option>
-        </select>
-      </td>
-      <td class="no-print">
-        <div class="action-menu">
-          <button class="action-menu-btn" title="Opções"><i data-lucide="more-vertical" size="18"></i></button>
-          <div class="action-menu-content">
-            <button class="btn btn-outline" style="padding:8px" onclick="imprimirRecibo(${idx})" title="Imprimir Recibo"><i data-lucide="printer" size="16"></i></button>
-            <button class="btn btn-outline" style="padding:8px" onclick="editarOS(${idx})" title="Editar"><i data-lucide="edit" size="16"></i></button>
-            <button class="btn btn-danger" style="padding:8px" onclick="excluir(${idx},'os')" title="Excluir"><i data-lucide="trash-2" size="16"></i></button>
-          </div>
-        </div>
-      </td>
-    </tr>`;
-  }).join('');
-  lucide.createIcons();
+        return `<tr>
+            <td style="font-size:0.85rem; color:var(--text-muted);">${fmtData(o.data)}</td>
+            <td>
+                <div style="font-weight:800; color:var(--primary-dark);">${o.cliente}</div>
+                <div style="font-size:0.8rem; color:var(--text-muted);">${o.modelo || '—'}</div>
+            </td>
+            <td><div style="max-width:200px; font-size:0.85rem; color:var(--text-muted); line-height:1.2">${o.defeito || '—'}</div></td>
+            <td style="color:var(--danger); font-weight:600">${fmtMoeda(custo)}</td>
+            <td style="color:var(--success); font-weight:600">${fmtMoeda(o.mao)}</td>
+            <td style="font-weight:800">${fmtMoeda(total)}</td>
+            <td style="color:${lucroCor}; font-weight:700">${fmtMoeda(lucro)}</td>
+            <td>
+                <select class="badge status-${o.status.replace(/\s/g,'')}" onchange="mudarStatusOS(${idx},this.value)">
+                    <option ${o.status==='Andamento'?'selected':''}>Andamento</option>
+                    <option ${o.status==='Pronta'?'selected':''}>Pronta</option>
+                    <option ${o.status==='Entregue'?'selected':''}>Entregue</option>
+                    <option ${o.status==='Cancelado'?'selected':''}>Cancelado</option>
+                </select>
+            </td>
+            <td class="no-print">
+                <div class="action-menu">
+                    <button class="action-menu-btn" title="Opções"><i data-lucide="more-vertical" size="18"></i></button>
+                    <div class="action-menu-content">
+                        <button class="btn btn-outline" style="padding:8px" onclick="imprimirRecibo(${idx})" title="Imprimir Recibo"><i data-lucide="printer" size="16"></i></button>
+                        <button class="btn btn-outline" style="padding:8px" onclick="editarOS(${idx})" title="Editar"><i data-lucide="edit" size="16"></i></button>
+                        <button class="btn btn-danger" style="padding:8px" onclick="excluir(${idx},'os')" title="Excluir"><i data-lucide="trash-2" size="16"></i></button>
+                    </div>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+    lucide.createIcons();
 }
 
 function imprimirRecibo(i) {
-  const o = db.os[i];
-  const total = o.total ?? ((o.custoPeca ?? o.pecas ?? 0) + o.mao);
-  document.getElementById('recData').textContent    = fmtData(hoje());
-  document.getElementById('recCliente').textContent = o.cliente;
-  document.getElementById('recModelo').textContent  = o.modelo || '—';
-  document.getElementById('recDefeito').textContent = o.defeito || 'Não informado';
-  document.getElementById('recTotal').textContent   = fmtMoeda(total);
-  document.body.classList.add('printing-receipt');
-  window.print();
-  document.body.classList.remove('printing-receipt');
+    const o = db.os[i];
+    const total = o.total ?? ((o.custoPeca ?? o.pecas ?? 0) + o.mao);
+    document.getElementById('recData').textContent    = fmtData(hoje());
+    document.getElementById('recCliente').textContent = o.cliente;
+    document.getElementById('recModelo').textContent  = o.modelo || '—';
+    document.getElementById('recDefeito').textContent = o.defeito || 'Não informado';
+    document.getElementById('recTotal').textContent   = fmtMoeda(total);
+    document.body.classList.add('printing-receipt');
+    window.print();
+    document.body.classList.remove('printing-receipt');
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1006,142 +1049,144 @@ function imprimirRecibo(i) {
 let editEstIdx = null;
 
 function toggleEstQtd() {
-  const isServ = document.getElementById('estTipo').value === 'servico';
-  document.getElementById('divEstQtd').style.display = isServ ? 'none' : 'flex';
+    const isServ = document.getElementById('estTipo').value === 'servico';
+    document.getElementById('divEstQtd').style.display = isServ ? 'none' : 'flex';
 }
 
 function calcMargemEst() {
-  const custo = parseMoeda(document.getElementById('estCusto').value);
-  const venda = parseMoeda(document.getElementById('estVenda').value);
-  const lucro = venda - custo;
-  if (custo > 0 && venda > 0) {
-    document.getElementById('estMargem').value = ((lucro / custo) * 100).toFixed(1) + '%';
-    document.getElementById('estLucroUnit').value = fmtMoeda(lucro);
-  } else {
-    document.getElementById('estMargem').value = '';
-    document.getElementById('estLucroUnit').value = '';
-  }
+    const custo = parseMoeda(document.getElementById('estCusto').value);
+    const venda = parseMoeda(document.getElementById('estVenda').value);
+    const lucro = venda - custo;
+    if (custo > 0 && venda > 0) {
+        document.getElementById('estMargem').value = ((lucro / custo) * 100).toFixed(1) + '%';
+        document.getElementById('estLucroUnit').value = fmtMoeda(lucro);
+    } else {
+        document.getElementById('estMargem').value = '';
+        document.getElementById('estLucroUnit').value = '';
+    }
 }
 
-function salvarEstoque() {
-  const nome = document.getElementById('estNome').value.trim();
-  if (!nome) { alert('Nome do item é obrigatório!'); return; }
-  const isServ = document.getElementById('estTipo').value === 'servico';
+async function salvarEstoque() {
+    const nome = document.getElementById('estNome').value.trim();
+    if (!nome) { alert('Nome do item é obrigatório!'); return; }
+    const isServ = document.getElementById('estTipo').value === 'servico';
 
-  const item = {
-    id:       editEstIdx !== null ? db.est[editEstIdx].id : uid(),
-    isServico: isServ,
-    nome,
-    qtd:     isServ ? null : (parseInt(document.getElementById('estQtd').value) || 0),
-    custo:   parseMoeda(document.getElementById('estCusto').value),
-    venda:   parseMoeda(document.getElementById('estVenda').value),
-  };
+    const item = {
+        id:       editEstIdx !== null ? db.est[editEstIdx].id : uid(),
+        isServico: isServ,
+        nome,
+        qtd:     isServ ? null : (parseInt(document.getElementById('estQtd').value) || 0),
+        custo:   parseMoeda(document.getElementById('estCusto').value),
+        venda:   parseMoeda(document.getElementById('estVenda').value),
+    };
 
-  if (editEstIdx !== null) db.est[editEstIdx] = item;
-  else db.est.push(item);
+    if (editEstIdx !== null) db.est[editEstIdx] = item;
+    else db.est.push(item);
 
-  cancelarEdicaoEstoque();
-  salvarAtualizar();
+    cancelarEdicaoEstoque();
+    await salvarNoFirebase('sgt_est', item);
+    atualizarTudo();
 }
 
 function editarEstoque(i) {
-  editEstIdx = i;
-  const p = db.est[i];
-  document.getElementById('estTipo').value  = p.isServico ? 'servico' : 'produto';
-  toggleEstQtd();
-  document.getElementById('estNome').value  = p.nome;
-  document.getElementById('estQtd').value   = p.isServico ? '' : p.qtd;
-  document.getElementById('estCusto').value = toInput(p.custo);
-  document.getElementById('estVenda').value = toInput(p.venda);
-  calcMargemEst();
-  document.getElementById('estFormTitle').textContent = 'Editar Item';
-  document.getElementById('btnSalvarEst').innerHTML = '<i data-lucide="check"></i> Atualizar Item';
-  document.getElementById('btnCancelEst').style.display = 'inline-flex';
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-  lucide.createIcons();
+    editEstIdx = i;
+    const p = db.est[i];
+    document.getElementById('estTipo').value  = p.isServico ? 'servico' : 'produto';
+    toggleEstQtd();
+    document.getElementById('estNome').value  = p.nome;
+    document.getElementById('estQtd').value   = p.isServico ? '' : p.qtd;
+    document.getElementById('estCusto').value = toInput(p.custo);
+    document.getElementById('estVenda').value = toInput(p.venda);
+    calcMargemEst();
+    document.getElementById('estFormTitle').textContent = 'Editar Item';
+    document.getElementById('btnSalvarEst').innerHTML = '<i data-lucide="check"></i> Atualizar Item';
+    document.getElementById('btnCancelEst').style.display = 'inline-flex';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    lucide.createIcons();
 }
 
 function cancelarEdicaoEstoque() {
-  editEstIdx = null;
-  ['estNome','estQtd','estCusto','estVenda','estMargem','estLucroUnit'].forEach(id => document.getElementById(id).value = '');
-  document.getElementById('estTipo').value = 'produto';
-  toggleEstQtd();
-  document.getElementById('estFormTitle').textContent = 'Cadastrar Item / Serviço';
-  document.getElementById('btnSalvarEst').innerHTML = '<i data-lucide="plus"></i> Salvar Item';
-  document.getElementById('btnCancelEst').style.display = 'none';
-  lucide.createIcons();
+    editEstIdx = null;
+    ['estNome','estQtd','estCusto','estVenda','estMargem','estLucroUnit'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('estTipo').value = 'produto';
+    toggleEstQtd();
+    document.getElementById('estFormTitle').textContent = 'Cadastrar Item / Serviço';
+    document.getElementById('btnSalvarEst').innerHTML = '<i data-lucide="plus"></i> Salvar Item';
+    document.getElementById('btnCancelEst').style.display = 'none';
+    lucide.createIcons();
 }
 
-// Função para aumentar e diminuir o estoque direto na tabela
-function alterarQtdEstoque(index, valor) {
+async function alterarQtdEstoque(index, valor) {
     if(db.est[index].isServico) return;
     db.est[index].qtd += valor;
-    if (db.est[index].qtd < 0) db.est[index].qtd = 0; // Impede estoque negativo
-    salvarAtualizar();
+    if (db.est[index].qtd < 0) db.est[index].qtd = 0;
+    
+    await salvarNoFirebase('sgt_est', db.est[index]);
+    atualizarTudo();
 }
 
 function renderEstoque() {
-  const busca = (document.getElementById('buscaEst').value || '').toLowerCase();
-  const filtroTipo = document.getElementById('filtroEstTipo').value;
-  const filtroEstoque = document.getElementById('filtroEstEstoque').value;
-  const tbody = document.getElementById('listaEst');
+    const busca = (document.getElementById('buscaEst').value || '').toLowerCase();
+    const filtroTipo = document.getElementById('filtroEstTipo').value;
+    const filtroEstoque = document.getElementById('filtroEstEstoque').value;
+    const tbody = document.getElementById('listaEst');
 
-  const filtrados = db.est.filter(p => {
-      const matchBusca = p.nome.toLowerCase().includes(busca);
-      const matchTipo = filtroTipo === '' || (filtroTipo === 'servico' ? p.isServico : !p.isServico);
-      let matchEst = true;
-      if (!p.isServico && filtroEstoque !== '') {
-          if (filtroEstoque === 'com_estoque') matchEst = p.qtd > 0;
-          if (filtroEstoque === 'sem_estoque') matchEst = p.qtd <= 0;
-      }
-      return matchBusca && matchTipo && matchEst;
-  });
+    const filtrados = db.est.filter(p => {
+        const matchBusca = p.nome.toLowerCase().includes(busca);
+        const matchTipo = filtroTipo === '' || (filtroTipo === 'servico' ? p.isServico : !p.isServico);
+        let matchEst = true;
+        if (!p.isServico && filtroEstoque !== '') {
+            if (filtroEstoque === 'com_estoque') matchEst = p.qtd > 0;
+            if (filtroEstoque === 'sem_estoque') matchEst = p.qtd <= 0;
+        }
+        return matchBusca && matchTipo && matchEst;
+    });
 
-  if (!filtrados.length) {
-    tbody.innerHTML = `<tr><td colspan="8" class="empty">Nenhum item encontrado com esses filtros</td></tr>`;
-    return;
-  }
-
-  tbody.innerHTML = filtrados.map((p) => {
-    const i = db.est.indexOf(p);
-    const lucroUnit = p.venda - p.custo;
-    const valEst = p.isServico ? null : (p.custo * (p.qtd || 0));
-    
-    let qtdBadge;
-    if (p.isServico) {
-      qtdBadge = `<span class="badge badge-purple">Serviço ∞</span>`;
-    } else {
-      let badgeClass = p.qtd <= 0 ? 'badge-red' : (p.qtd <= 2 ? 'badge-yellow' : 'badge-gray');
-      let iconWarn = (p.qtd <= 2 && p.qtd > 0) ? '⚠ ' : '';
-      qtdBadge = `
-        <div style="display: flex; align-items: center; gap: 8px;">
-            <button class="btn-qtd" onclick="alterarQtdEstoque(${i}, -1)" title="Diminuir Estoque"><i data-lucide="minus" size="14"></i></button>
-            <span class="badge ${badgeClass}">${iconWarn}${p.qtd} un.</span>
-            <button class="btn-qtd" onclick="alterarQtdEstoque(${i}, 1)" title="Adicionar Estoque"><i data-lucide="plus" size="14"></i></button>
-        </div>
-      `;
+    if (!filtrados.length) {
+        tbody.innerHTML = `<tr><td colspan="8" class="empty">Nenhum item encontrado com esses filtros</td></tr>`;
+        return;
     }
 
-    return `<tr>
-      <td style="font-weight: 600;">${p.nome}</td>
-      <td>${p.isServico ? `<span class="badge badge-purple">Serviço</span>` : `<span class="badge badge-gray">Produto</span>`}</td>
-      <td>${qtdBadge}</td>
-      <td style="color:var(--danger); font-weight:500;">${fmtMoeda(p.custo)}</td>
-      <td style="color:var(--success); font-weight:500;">${fmtMoeda(p.venda)}</td>
-      <td style="color:${lucroUnit >= 0 ? 'var(--success)' : 'var(--danger)'}; font-weight: bold;">${fmtMoeda(lucroUnit)}</td>
-      <td style="color:var(--text-muted)">${p.isServico ? '—' : fmtMoeda(valEst)}</td>
-      <td class="no-print">
-        <div class="action-menu">
-          <button class="action-menu-btn" title="Opções"><i data-lucide="more-vertical" size="18"></i></button>
-          <div class="action-menu-content">
-            <button class="btn btn-outline" style="padding:8px" onclick="editarEstoque(${i})" title="Editar"><i data-lucide="edit" size="16"></i></button>
-            <button class="btn btn-danger" style="padding:8px" onclick="excluir(${i},'est')" title="Excluir"><i data-lucide="trash-2" size="16"></i></button>
-          </div>
-        </div>
-      </td>
-    </tr>`;
-  }).join('');
-  lucide.createIcons();
+    tbody.innerHTML = filtrados.map((p) => {
+        const i = db.est.indexOf(p);
+        const lucroUnit = p.venda - p.custo;
+        const valEst = p.isServico ? null : (p.custo * (p.qtd || 0));
+        
+        let qtdBadge;
+        if (p.isServico) {
+            qtdBadge = `<span class="badge badge-purple">Serviço ∞</span>`;
+        } else {
+            let badgeClass = p.qtd <= 0 ? 'badge-red' : (p.qtd <= 2 ? 'badge-yellow' : 'badge-gray');
+            let iconWarn = (p.qtd <= 2 && p.qtd > 0) ? '⚠ ' : '';
+            qtdBadge = `
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <button class="btn-qtd" onclick="alterarQtdEstoque(${i}, -1)" title="Diminuir Estoque"><i data-lucide="minus" size="14"></i></button>
+                    <span class="badge ${badgeClass}">${iconWarn}${p.qtd} un.</span>
+                    <button class="btn-qtd" onclick="alterarQtdEstoque(${i}, 1)" title="Adicionar Estoque"><i data-lucide="plus" size="14"></i></button>
+                </div>
+            `;
+        }
+
+        return `<tr>
+            <td style="font-weight: 600;">${p.nome}</td>
+            <td>${p.isServico ? `<span class="badge badge-purple">Serviço</span>` : `<span class="badge badge-gray">Produto</span>`}</td>
+            <td>${qtdBadge}</td>
+            <td style="color:var(--danger); font-weight:500;">${fmtMoeda(p.custo)}</td>
+            <td style="color:var(--success); font-weight:500;">${fmtMoeda(p.venda)}</td>
+            <td style="color:${lucroUnit >= 0 ? 'var(--success)' : 'var(--danger)'}; font-weight: bold;">${fmtMoeda(lucroUnit)}</td>
+            <td style="color:var(--text-muted)">${p.isServico ? '—' : fmtMoeda(valEst)}</td>
+            <td class="no-print">
+                <div class="action-menu">
+                    <button class="action-menu-btn" title="Opções"><i data-lucide="more-vertical" size="18"></i></button>
+                    <div class="action-menu-content">
+                        <button class="btn btn-outline" style="padding:8px" onclick="editarEstoque(${i})" title="Editar"><i data-lucide="edit" size="16"></i></button>
+                        <button class="btn btn-danger" style="padding:8px" onclick="excluir(${i},'est')" title="Excluir"><i data-lucide="trash-2" size="16"></i></button>
+                    </div>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+    lucide.createIcons();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1168,17 +1213,17 @@ function filtrarPDV(el) {
 }
 
 function selecionarItemPDV(id) {
-  const p = db.est.find(x => x.id == id);
-  if (!p) return;
-  document.getElementById('vendaItemId').value     = p.id;
-  document.getElementById('vendaBusca').value      = p.nome;
-  document.getElementById('vendaValorUnit').value  = toInput(p.venda);
-  document.getElementById('vendaCustoUnit').value  = toInput(p.custo);
-  document.getElementById('vendaQtd').value        = 1;
-  document.getElementById('vendaQtd').max          = p.isServico ? '' : p.qtd;
-  document.getElementById('vendaAcList').classList.remove('open');
-  
-  document.getElementById('btnLimparPecaPDV').style.display = 'block';
+    const p = db.est.find(x => x.id == id);
+    if (!p) return;
+    document.getElementById('vendaItemId').value     = p.id;
+    document.getElementById('vendaBusca').value      = p.nome;
+    document.getElementById('vendaValorUnit').value  = toInput(p.venda);
+    document.getElementById('vendaCustoUnit').value  = toInput(p.custo);
+    document.getElementById('vendaQtd').value        = 1;
+    document.getElementById('vendaQtd').max          = p.isServico ? '' : p.qtd;
+    document.getElementById('vendaAcList').classList.remove('open');
+    
+    document.getElementById('btnLimparPecaPDV').style.display = 'block';
 }
 
 function limparItemPDV() {
@@ -1262,14 +1307,14 @@ function renderCarrinho() {
     lucide.createIcons();
 }
 
-function realizarVenda() {
+async function realizarVenda() {
     if (carrinhoPDV.length === 0) { alert('Adicione pelo menos um item ao carrinho primeiro!'); return; }
 
     const clienteVenda = document.getElementById('vendaCliente').value.trim() || 'Ao consumidor';
     const descGlobal = parseMoeda(document.getElementById('vendaDescGlobal').value) || 0;
     const subtotalCart = carrinhoPDV.reduce((acc, item) => acc + item.subtotal, 0);
     
-    carrinhoPDV.forEach(item => {
+    for (const item of carrinhoPDV) {
         const proporcao = subtotalCart > 0 ? (item.subtotal / subtotalCart) : 0;
         const descontoProporcional = descGlobal * proporcao;
         
@@ -1277,7 +1322,7 @@ function realizarVenda() {
         const custoTItem = item.custoUnit * item.qtd;
         const lucroItem = receitaRealItem - custoTItem;
 
-        db.ven.push({
+        const novaVenda = {
             id: uid(),
             data: hoje(),
             cliente: clienteVenda,
@@ -1286,55 +1331,60 @@ function realizarVenda() {
             custoT: custoTItem,
             receita: receitaRealItem,
             lucro: lucroItem
-        });
+        };
+
+        db.ven.push(novaVenda);
+        await salvarNoFirebase('sgt_ven', novaVenda);
 
         if (!item.isServico) {
             const estItem = db.est.find(x => x.id == item.id);
-            if (estItem) estItem.qtd -= item.qtd;
+            if (estItem) {
+                estItem.qtd -= item.qtd;
+                await salvarNoFirebase('sgt_est', estItem);
+            }
         }
-    });
-
-    salvarAtualizar();
+    }
     
     carrinhoPDV = [];
     document.getElementById('vendaDescGlobal').value = '';
     document.getElementById('vendaCliente').value = 'Ao consumidor';
     renderCarrinho();
+    atualizarTudo();
     
     alert('Venda registrada com sucesso!');
 }
 
 function renderVendas() {
-  const tbody = document.getElementById('listaVendas');
-  const filtradas = db.ven.filter(v => dentroFiltro(v.data));
+    const tbody = document.getElementById('listaVendas');
+    const filtradas = db.ven.filter(v => dentroFiltro(v.data));
 
-  if (!filtradas.length) {
-    tbody.innerHTML = `<tr><td colspan="8" class="empty">Nenhuma venda no período</td></tr>`;
-    return;
-  }
+    if (!filtradas.length) {
+        tbody.innerHTML = `<tr><td colspan="8" class="empty">Nenhuma venda no período</td></tr>`;
+        return;
+    }
 
-  const vendasExibir = [...filtradas].reverse();
+    const vendasExibir = [...filtradas].reverse();
 
-  tbody.innerHTML = vendasExibir.map(v => {
-    const originalIndex = db.ven.findIndex(dbItem => dbItem.id === v.id);
-    const lucro = v.lucro ?? (v.total - v.custoT); 
-    
-    return `<tr>
-      <td style="font-size:0.85rem; color:var(--text-muted);">${fmtData(v.data)}</td>
-      <td><div style="font-weight: 800; color: var(--primary-dark);">${v.cliente || 'Ao consumidor'}</div></td>
-      <td style="font-weight: 600;">${v.produto}</td>
-      <td>${v.qtd} un.</td>
-      <td style="color:var(--danger); font-weight:500">${fmtMoeda(v.custoT)}</td>
-      <td style="color:var(--success); font-weight:bold;">${fmtMoeda(v.receita ?? v.total)}</td>
-      <td style="color:${lucro >= 0 ? 'var(--success)' : 'var(--danger)'}; font-weight:bold;">${fmtMoeda(lucro)}</td>
-      <td class="no-print">
-        <button class="btn btn-danger" style="padding:8px" onclick="excluir(${originalIndex},'ven')" title="Cancelar Venda e Excluir Registro">
-          <i data-lucide="trash-2" size="16"></i>
-        </button>
-      </td>
-    </tr>`;
-  }).join('');
-  lucide.createIcons();
+    tbody.innerHTML = vendasExibir.map(v => {
+        const originalIndex = db.ven.findIndex(dbItem => dbItem.id === v.id);
+        const lucro = v.lucro ?? (v.total - v.custoT); 
+        
+        return `<tr>
+            <td style="font-size:0.85rem; color:var(--text-muted);">${fmtData(v.data)}</td>
+            <td><div style="font-weight: 800; color: var(--primary-dark);">${v.cliente || 'Ao consumidor'}</div></td>
+            <td style="font-weight: 600;">${v.produto}</td>
+            <td>${v.qtd} un.</td>
+            <td style="color:var(--danger); font-weight:500">${fmtMoeda(v.custoT)}</td>
+            <td style="color:var(--success); font-weight:bold;">${fmtMoeda(v.receita ?? v.total)}</td>
+            <td style="color:${lucro >= 0 ? 'var(--success)' : 'var(--danger)'}; font-weight:bold;">${fmtMoeda(lucro)}</td>
+            <td class="no-print">
+                <button class="btn btn-danger" style="padding:8px" onclick="excluir(${originalIndex},'ven')" title="Cancelar Venda e Excluir Registro">
+                    <i data-lucide="trash-2" size="16"></i>
+                </button>
+            </td>
+        </tr>`;
+    }).join('');
+    lucide.createIcons();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1342,231 +1392,255 @@ function renderVendas() {
 // ═══════════════════════════════════════════════════════
 let editInsIdx = null;
 
-function salvarInsumo() {
-  const desc = document.getElementById('inDesc').value.trim();
-  const val  = parseMoeda(document.getElementById('inValor').value);
-  if (!desc) { alert('Descrição é obrigatória!'); return; }
-  if (!val)  { alert('Informe o valor!'); return; }
+async function salvarInsumo() {
+    const desc = document.getElementById('inDesc').value.trim();
+    const val  = parseMoeda(document.getElementById('inValor').value);
+    if (!desc) { alert('Descrição é obrigatória!'); return; }
+    if (!val)  { alert('Informe o valor!'); return; }
 
-  const ins = {
-    id:   editInsIdx !== null ? db.ins[editInsIdx].id : uid(),
-    data: document.getElementById('inData').value || hoje(),
-    desc,
-    tipo: document.getElementById('inTipo').value,
-    valor: val,
-  };
+    const ins = {
+        id:   editInsIdx !== null ? db.ins[editInsIdx].id : uid(),
+        data: document.getElementById('inData').value || hoje(),
+        desc,
+        tipo: document.getElementById('inTipo').value,
+        valor: val,
+    };
 
-  if (editInsIdx !== null) db.ins[editInsIdx] = ins;
-  else db.ins.push(ins);
+    if (editInsIdx !== null) db.ins[editInsIdx] = ins;
+    else db.ins.push(ins);
 
-  cancelarEdicaoInsumo();
-  salvarAtualizar();
+    cancelarEdicaoInsumo();
+    await salvarNoFirebase('sgt_ins', ins);
+    atualizarTudo();
 }
 
 function editarInsumo(i) {
-  editInsIdx = i;
-  const ins = db.ins[i];
-  document.getElementById('inDesc').value  = ins.desc;
-  document.getElementById('inTipo').value  = ins.tipo;
-  document.getElementById('inValor').value = toInput(ins.valor);
-  document.getElementById('inData').value  = ins.data || hoje();
-  document.getElementById('btnSalvarIns').innerHTML = '<i data-lucide="check"></i> Atualizar';
-  document.getElementById('btnCancelIns').style.display = 'inline-flex';
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-  lucide.createIcons();
+    editInsIdx = i;
+    const ins = db.ins[i];
+    document.getElementById('inDesc').value  = ins.desc;
+    document.getElementById('inTipo').value  = ins.tipo;
+    document.getElementById('inValor').value = toInput(ins.valor);
+    document.getElementById('inData').value  = ins.data || hoje();
+    document.getElementById('btnSalvarIns').innerHTML = '<i data-lucide="check"></i> Atualizar';
+    document.getElementById('btnCancelIns').style.display = 'inline-flex';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    lucide.createIcons();
 }
 
 function cancelarEdicaoInsumo() {
-  editInsIdx = null;
-  document.getElementById('inDesc').value  = '';
-  document.getElementById('inValor').value = '';
-  document.getElementById('inData').value  = hoje();
-  document.getElementById('btnSalvarIns').innerHTML = '<i data-lucide="plus-circle"></i> Confirmar Lançamento';
-  document.getElementById('btnCancelIns').style.display = 'none';
-  lucide.createIcons();
+    editInsIdx = null;
+    document.getElementById('inDesc').value  = '';
+    document.getElementById('inValor').value = '';
+    document.getElementById('inData').value  = hoje();
+    document.getElementById('btnSalvarIns').innerHTML = '<i data-lucide="plus-circle"></i> Confirmar Lançamento';
+    document.getElementById('btnCancelIns').style.display = 'none';
+    lucide.createIcons();
 }
 
 function renderInsumos() {
-  const tbody = document.getElementById('listaIns');
-  const filtrados = db.ins.filter(i => dentroFiltro(i.data || hoje()));
+    const tbody = document.getElementById('listaIns');
+    const filtrados = db.ins.filter(i => dentroFiltro(i.data || hoje()));
 
-  if (!filtrados.length) {
-    tbody.innerHTML = `<tr><td colspan="5" class="empty">Nenhuma despesa lançada no período</td></tr>`;
-    return;
-  }
+    if (!filtrados.length) {
+        tbody.innerHTML = `<tr><td colspan="5" class="empty">Nenhuma despesa lançada no período</td></tr>`;
+        return;
+    }
 
-  tbody.innerHTML = filtrados.map(ins => {
-    const i = db.ins.indexOf(ins);
-    return `<tr>
-      <td style="font-size:0.85rem; color:var(--text-muted);">${fmtData(ins.data)}</td>
-      <td style="font-weight: 600;">${ins.desc}</td>
-      <td><span class="badge badge-gray">${ins.tipo}</span></td>
-      <td style="color:var(--danger); font-weight:bold;">- ${fmtMoeda(ins.valor)}</td>
-      <td class="no-print">
-        <div class="action-menu">
-          <button class="action-menu-btn" title="Opções"><i data-lucide="more-vertical" size="18"></i></button>
-          <div class="action-menu-content">
-            <button class="btn btn-outline" style="padding:8px" onclick="editarInsumo(${i})" title="Editar"><i data-lucide="edit" size="16"></i></button>
-            <button class="btn btn-danger" style="padding:8px" onclick="excluir(${i},'ins')" title="Excluir"><i data-lucide="trash-2" size="16"></i></button>
-          </div>
-        </div>
-      </td>
-    </tr>`;
-  }).join('');
-  lucide.createIcons();
+    tbody.innerHTML = filtrados.map(ins => {
+        const i = db.ins.indexOf(ins);
+        return `<tr>
+            <td style="font-size:0.85rem; color:var(--text-muted);">${fmtData(ins.data)}</td>
+            <td style="font-weight: 600;">${ins.desc}</td>
+            <td><span class="badge badge-gray">${ins.tipo}</span></td>
+            <td style="color:var(--danger); font-weight:bold;">- ${fmtMoeda(ins.valor)}</td>
+            <td class="no-print">
+                <div class="action-menu">
+                    <button class="action-menu-btn" title="Opções"><i data-lucide="more-vertical" size="18"></i></button>
+                    <div class="action-menu-content">
+                        <button class="btn btn-outline" style="padding:8px" onclick="editarInsumo(${i})" title="Editar"><i data-lucide="edit" size="16"></i></button>
+                        <button class="btn btn-danger" style="padding:8px" onclick="excluir(${i},'ins')" title="Excluir"><i data-lucide="trash-2" size="16"></i></button>
+                    </div>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+    lucide.createIcons();
 }
 
 // ═══════════════════════════════════════════════════════
 //  FINANCEIRO — EXTRATO
 // ═══════════════════════════════════════════════════════
 function renderFinanceiro() {
-  const tbody = document.getElementById('listaFin');
-  const regs = [];
+    const tbody = document.getElementById('listaFin');
+    const regs = [];
 
-  db.os.filter(o => o.status === 'Entregue' && dentroFiltro(o.data)).forEach(o => {
-    const custo = o.custoPeca ?? o.pecas ?? 0;
-    const total = o.total ?? (custo + o.mao);
-    regs.push({ d: o.data, tipo: 'Receita OS', desc: `${o.cliente} — ${o.modelo || o.defeito}`, v: total });
-    if (custo > 0) regs.push({ d: o.data, tipo: 'Custo Peça', desc: `Peça usada na OS (${o.cliente})`, v: -custo });
-  });
+    db.os.filter(o => o.status === 'Entregue' && dentroFiltro(o.data)).forEach(o => {
+        const custo = o.custoPeca ?? o.pecas ?? 0;
+        const total = o.total ?? (custo + o.mao);
+        regs.push({ d: o.data, tipo: 'Receita OS', desc: `${o.cliente} — ${o.modelo || o.defeito}`, v: total });
+        if (custo > 0) regs.push({ d: o.data, tipo: 'Custo Peça', desc: `Peça usada na OS (${o.cliente})`, v: -custo });
+    });
 
-  db.ven.filter(v => dentroFiltro(v.data)).forEach(v => {
-    const rec = v.receita ?? v.total;
-    regs.push({ d: v.data, tipo: 'Venda PDV', desc: `${v.produto} × ${v.qtd} (${v.cliente || 'Ao consumidor'})`, v: rec });
-    if (v.custoT > 0) regs.push({ d: v.data, tipo: 'Custo Venda', desc: `Custo do produto: ${v.produto}`, v: -v.custoT });
-  });
+    db.ven.filter(v => dentroFiltro(v.data)).forEach(v => {
+        const rec = v.receita ?? v.total;
+        regs.push({ d: v.data, tipo: 'Venda PDV', desc: `${v.produto} × ${v.qtd} (${v.cliente || 'Ao consumidor'})`, v: rec });
+        if (v.custoT > 0) regs.push({ d: v.data, tipo: 'Custo Venda', desc: `Custo do produto: ${v.produto}`, v: -v.custoT });
+    });
 
-  db.ins.filter(i => dentroFiltro(i.data || hoje())).forEach(i => {
-    regs.push({ d: i.data || hoje(), tipo: 'Despesa', desc: `${i.tipo}: ${i.desc}`, v: -i.valor });
-  });
+    db.ins.filter(i => dentroFiltro(i.data || hoje())).forEach(i => {
+        regs.push({ d: i.data || hoje(), tipo: 'Despesa', desc: `${i.tipo}: ${i.desc}`, v: -i.valor });
+    });
 
-  regs.sort((a, b) => b.d.localeCompare(a.d));
+    regs.sort((a, b) => b.d.localeCompare(a.d));
 
-  if (!regs.length) {
-    tbody.innerHTML = `<tr><td colspan="4" class="empty">Sem movimentações no período</td></tr>`;
-    return;
-  }
+    if (!regs.length) {
+        tbody.innerHTML = `<tr><td colspan="4" class="empty">Sem movimentações no período</td></tr>`;
+        return;
+    }
 
-  const tipoBadge = {
-    'Receita OS':  'badge-green',
-    'Custo Peça':  'badge-red',
-    'Venda PDV':   'badge-blue',
-    'Custo Venda': 'badge-red',
-    'Despesa':     'badge-yellow',
-  };
+    const tipoBadge = {
+        'Receita OS':  'badge-green',
+        'Custo Peça':  'badge-red',
+        'Venda PDV':   'badge-blue',
+        'Custo Venda': 'badge-red',
+        'Despesa':     'badge-yellow',
+    };
 
-  tbody.innerHTML = regs.map(r => `
-    <tr>
-      <td style="font-size:0.85rem; color:var(--text-muted);">${fmtData(r.d)}</td>
-      <td><span class="badge ${tipoBadge[r.tipo] || 'badge-gray'}">${r.tipo}</span></td>
-      <td style="color:var(--text-main); font-weight:500;">${r.desc}</td>
-      <td style="text-align:right; font-weight:800; color:${r.v >= 0 ? 'var(--success)' : 'var(--danger)'}">
-        ${r.v >= 0 ? '+' : ''}${fmtMoeda(r.v)}
-      </td>
-    </tr>`).join('');
+    tbody.innerHTML = regs.map(r => `
+        <tr>
+            <td style="font-size:0.85rem; color:var(--text-muted);">${fmtData(r.d)}</td>
+            <td><span class="badge ${tipoBadge[r.tipo] || 'badge-gray'}">${r.tipo}</span></td>
+            <td style="color:var(--text-main); font-weight:500;">${r.desc}</td>
+            <td style="text-align:right; font-weight:800; color:${r.v >= 0 ? 'var(--success)' : 'var(--danger)'}">
+                ${r.v >= 0 ? '+' : ''}${fmtMoeda(r.v)}
+            </td>
+        </tr>`).join('');
 }
 
 // ═══════════════════════════════════════════════════════
 //  DASHBOARD — ESTATÍSTICAS
 // ═══════════════════════════════════════════════════════
 function atualizarDashboard() {
-  const f_os  = db.os.filter(o => dentroFiltro(o.data));
-  const f_ven = db.ven.filter(v => dentroFiltro(v.data));
-  const f_ins = db.ins.filter(i => dentroFiltro(i.data || hoje()));
+    const f_os  = db.os.filter(o => dentroFiltro(o.data));
+    const f_ven = db.ven.filter(v => dentroFiltro(v.data));
+    const f_ins = db.ins.filter(i => dentroFiltro(i.data || hoje()));
 
-  const pendentes = f_os.filter(o => o.status === 'Andamento').length;
+    const pendentes = f_os.filter(o => o.status === 'Andamento').length;
 
-  const receitaOS = f_os
-    .filter(o => o.status === 'Entregue')
-    .reduce((acc, o) => acc + (o.total ?? ((o.custoPeca ?? o.pecas ?? 0) + o.mao)), 0);
+    const receitaOS = f_os
+        .filter(o => o.status === 'Entregue')
+        .reduce((acc, o) => acc + (o.total ?? ((o.custoPeca ?? o.pecas ?? 0) + o.mao)), 0);
 
-  const receitaVen = f_ven.reduce((acc, v) => acc + (v.receita ?? v.total), 0);
-  const receita = receitaOS + receitaVen;
+    const receitaVen = f_ven.reduce((acc, v) => acc + (v.receita ?? v.total), 0);
+    const receita = receitaOS + receitaVen;
 
-  const custoPecasOS = f_os
-    .filter(o => o.status === 'Entregue')
-    .reduce((acc, o) => acc + (o.custoPeca ?? o.pecas ?? 0), 0);
+    const custoPecasOS = f_os
+        .filter(o => o.status === 'Entregue')
+        .reduce((acc, o) => acc + (o.custoPeca ?? o.pecas ?? 0), 0);
 
-  const custoPDV  = f_ven.reduce((acc, v) => acc + v.custoT, 0);
-  const custoIns  = f_ins.reduce((acc, i) => acc + i.valor, 0);
-  const despesas  = custoPecasOS + custoPDV + custoIns;
+    const custoPDV  = f_ven.reduce((acc, v) => acc + v.custoT, 0);
+    const custoIns  = f_ins.reduce((acc, i) => acc + i.valor, 0);
+    const despesas  = custoPecasOS + custoPDV + custoIns;
 
-  const lucro = receita - despesas;
+    const lucro = receita - despesas;
 
-  const capitalEst = db.est
-    .filter(p => !p.isServico)
-    .reduce((acc, p) => acc + (p.custo * (p.qtd || 0)), 0);
+    const capitalEst = db.est
+        .filter(p => !p.isServico)
+        .reduce((acc, p) => acc + (p.custo * (p.qtd || 0)), 0);
 
-  document.getElementById('statPendentes').textContent = pendentes;
-  document.getElementById('statReceita').textContent   = fmtMoeda(receita);
-  document.getElementById('statCusto').textContent     = fmtMoeda(despesas);
-  document.getElementById('statEstoque').textContent   = fmtMoeda(capitalEst);
-  document.getElementById('statLucro').textContent     = fmtMoeda(lucro);
-  document.getElementById('statLucro').style.color     = lucro >= 0 ? 'white' : '#ffcfcf';
+    document.getElementById('statPendentes').textContent = pendentes;
+    document.getElementById('statReceita').textContent   = fmtMoeda(receita);
+    document.getElementById('statCusto').textContent     = fmtMoeda(despesas);
+    document.getElementById('statEstoque').textContent   = fmtMoeda(capitalEst);
+    document.getElementById('statLucro').textContent     = fmtMoeda(lucro);
+    document.getElementById('statLucro').style.color     = lucro >= 0 ? 'white' : '#ffcfcf';
 }
 
 // ═══════════════════════════════════════════════════════
-//  EXCLUSÃO
+//  EXCLUSÃO NO FIRESTORE
 // ═══════════════════════════════════════════════════════
-function excluir(i, tipo) {
-  if (!confirm('Excluir permanentemente este registro?')) return;
-  if (tipo === 'os') {
-    const o = db.os[i];
-    if ((o.status === 'Entregue' || o.status === 'Pronta') && o.idPeca) {
-      const item = db.est.find(x => x.id == o.idPeca);
-      if (item && !item.isServico) item.qtd++;
+async function excluir(i, tipo) {
+    if (!confirm('Excluir permanentemente este registro?')) return;
+    
+    let colecao = tipo === 'os' ? 'sgt_os' : tipo === 'est' ? 'sgt_est' : tipo === 'ven' ? 'sgt_ven' : 'sgt_ins';
+    let idDoc = db[tipo][i].id;
+
+    if (tipo === 'os') {
+        const o = db.os[i];
+        if ((o.status === 'Entregue' || o.status === 'Pronta') && o.idPeca) {
+            const item = db.est.find(x => x.id == o.idPeca);
+            if (item && !item.isServico) {
+                item.qtd++;
+                await salvarNoFirebase('sgt_est', item);
+            }
+        }
+    } else if (tipo === 'ven') {
+        const v = db.ven[i];
+        const item = db.est.find(x => x.nome === v.produto);
+        if (item && !item.isServico) {
+            item.qtd += v.qtd;
+            await salvarNoFirebase('sgt_est', item);
+        }
     }
-    db.os.splice(i, 1);
-    cancelarEdicaoOS();
-  } else if (tipo === 'est') {
-    db.est.splice(i, 1);
-    cancelarEdicaoEstoque();
-  } else if (tipo === 'ven') {
-    const v = db.ven[i];
-    const item = db.est.find(x => x.nome === v.produto);
-    if (item && !item.isServico) item.qtd += v.qtd;
-    db.ven.splice(i, 1);
-  } else if (tipo === 'ins') {
-    db.ins.splice(i, 1);
-    cancelarEdicaoInsumo();
-  }
-  salvarAtualizar();
+
+    try {
+        await window.fs_deleteDoc(window.fs_doc(window.dbFirestore, colecao, idDoc.toString()));
+        db[tipo].splice(i, 1);
+        
+        if (tipo === 'os') cancelarEdicaoOS();
+        if (tipo === 'est') cancelarEdicaoEstoque();
+        if (tipo === 'ins') cancelarEdicaoInsumo();
+        
+        atualizarTudo();
+    } catch (error) {
+        console.error("Erro ao excluir:", error);
+    }
 }
 
 // ═══════════════════════════════════════════════════════
-//  BACKUP E MODAL QR CODE
+//  BACKUP / RESTAURAR DADOS PARA NUVEM E MODAL
 // ═══════════════════════════════════════════════════════
 function exportarDados() {
-  const blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `SGTPro_Backup_${hoje()}.json`;
-  a.click();
-  URL.revokeObjectURL(a.href);
+    const blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `SGTPro_Backup_Nuvem_${hoje()}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
 }
 
 function importarDados() {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.json';
-  input.onchange = e => {
-    const reader = new FileReader();
-    reader.onload = re => {
-      try {
-        const c = JSON.parse(re.target.result);
-        db.os  = c.os  || [];
-        db.est = c.est || c.estoque || [];
-        db.ven = c.ven || c.vendas  || [];
-        db.ins = c.ins || c.insumos || [];
-        salvarAtualizar();
-        alert('Dados restaurados com sucesso!');
-      } catch(err) {
-        alert('Arquivo inválido ou corrompido.');
-      }
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = e => {
+        const reader = new FileReader();
+        reader.onload = async re => {
+            try {
+                const c = JSON.parse(re.target.result);
+                db.os  = c.os  || [];
+                db.est = c.est || c.estoque || [];
+                db.ven = c.ven || c.vendas  || [];
+                db.ins = c.ins || c.insumos || [];
+                
+                alert('Restaurando os dados para a Nuvem. Por favor, aguarde alguns segundos...');
+                
+                // Repassando os backups para a nuvem
+                for (let o of db.os) await salvarNoFirebase('sgt_os', o);
+                for (let e of db.est) await salvarNoFirebase('sgt_est', e);
+                for (let v of db.ven) await salvarNoFirebase('sgt_ven', v);
+                for (let i of db.ins) await salvarNoFirebase('sgt_ins', i);
+
+                atualizarTudo();
+                alert('Todos os dados foram restaurados para o banco de dados online com sucesso!');
+            } catch(err) {
+                alert('Arquivo inválido ou corrompido.');
+                console.error(err);
+            }
+        };
+        reader.readAsText(e.target.files[0]);
     };
-    reader.readAsText(e.target.files[0]);
-  };
-  input.click();
+    input.click();
 }
 
 function abrirQRModal() {
@@ -1579,16 +1653,17 @@ function fecharQRModal() {
 }
 
 function atualizarTudo() {
-  renderOS();
-  renderEstoque();
-  renderVendas();
-  renderInsumos();
-  renderFinanceiro();
-  atualizarDashboard();
+    renderOS();
+    renderEstoque();
+    renderVendas();
+    renderInsumos();
+    renderFinanceiro();
+    atualizarDashboard();
 }
 
 // Inicializa a página e desenha os ícones da barra lateral
 lucide.createIcons();
+// A renderização das listas aguardará a carga dos dados do Firebase (chamada no bloco module).
 atualizarTudo();
 </script>
 </body>
