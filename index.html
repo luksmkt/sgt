@@ -230,9 +230,36 @@
             border-radius: 8px; display: flex; align-items: center; justify-content: center;
         }
         .close-modal:hover { color: var(--danger); background: #fff1f2; }
+
+        /* Estilo Específico da Tela de Login */
+        #login-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            background: var(--bg); z-index: 3000; 
+            display: flex; justify-content: center; align-items: center;
+        }
     </style>
 </head>
 <body>
+
+<!-- TELA DE LOGIN OVERLAY -->
+<div id="login-screen">
+    <div class="card" style="width: 100%; max-width: 400px; text-align: center;">
+        <div class="logo" style="justify-content: center; font-size: 1.8rem; margin-bottom: 20px;">
+            <i data-lucide="layout-dashboard" size="32"></i> SGT Pro
+        </div>
+        <h3 style="margin-top: 0; color: var(--text-muted); font-weight: 600;">Acesso Restrito</h3>
+        <div class="input-group" style="text-align: left; margin-bottom: 15px;">
+            <label>E-mail</label>
+            <input type="email" id="loginEmail" placeholder="seu-email@exemplo.com">
+        </div>
+        <div class="input-group" style="text-align: left; margin-bottom: 25px;">
+            <label>Senha</label>
+            <input type="password" id="loginSenha" placeholder="••••••••">
+        </div>
+        <button class="btn btn-primary" style="width: 100%; padding: 15px; font-size: 1.1rem;" onclick="fazerLogin()">Entrar no Sistema</button>
+        <p id="loginError" style="color: var(--danger); font-size: 0.85rem; margin-top: 15px; display: none; font-weight: bold;">Credenciais inválidas. Verifique seu e-mail e senha.</p>
+    </div>
+</div>
 
 <aside id="sidebar" class="no-print">
     <div class="sidebar-header">
@@ -250,6 +277,8 @@
         <button data-title="Fazer Backup" onclick="exportarDados()"><i data-lucide="database"></i> <span class="nav-text">Backup</span></button>
         <button data-title="Restaurar Dados" onclick="importarDados()"><i data-lucide="upload-cloud"></i> <span class="nav-text">Restaurar</span></button>
         <button data-title="App Mobile" onclick="abrirQRModal()"><i data-lucide="smartphone"></i> <span class="nav-text">App Mobile</span></button>
+        <!-- BOTÃO DE SAIR (LOGOUT) ADICIONADO AQUI -->
+        <button data-title="Sair do Sistema" onclick="fazerLogout()" style="color: var(--danger);"><i data-lucide="log-out"></i> <span class="nav-text">Sair</span></button>
     </div>
 </aside>
 
@@ -595,10 +624,11 @@
     </div>
 </div>
 
-<!-- INICIALIZAÇÃO FIREBASE VIA MÓDULO (TEMPO REAL) -->
+<!-- INICIALIZAÇÃO FIREBASE VIA MÓDULO (TEMPO REAL E AUTENTICAÇÃO) -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
   import { getFirestore, collection, setDoc, doc, deleteDoc, onSnapshot, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+  import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyAIotobZ1gPI2NWmQUklOVBeN-1x-UeaAc",
@@ -611,7 +641,7 @@
 
   const app = initializeApp(firebaseConfig);
   
-  // Disponibilizando as funções do Firebase no contexto global da janela
+  // Funções do Firestore
   window.dbFirestore = getFirestore(app);
   window.fs_collection = collection;
   window.fs_setDoc = setDoc;
@@ -620,10 +650,24 @@
   window.fs_onSnapshot = onSnapshot;
   window.fs_getDocs = getDocs;
 
-  // Inicia a escuta em tempo real (função definida no bloco abaixo)
-  if (window.iniciarEscutaEmTempoReal) {
-      window.iniciarEscutaEmTempoReal();
-  }
+  // Funções de Autenticação
+  window.fs_auth = getAuth(app);
+  window.fs_signIn = signInWithEmailAndPassword;
+  window.fs_signOut = signOut;
+
+  // Gerenciador de Estado de Login
+  onAuthStateChanged(window.fs_auth, (user) => {
+      if (user) {
+          // Usuário logado: Esconde tela de login e puxa os dados do banco
+          document.getElementById('login-screen').style.display = 'none';
+          if (window.iniciarEscutaEmTempoReal) {
+              window.iniciarEscutaEmTempoReal();
+          }
+      } else {
+          // Usuário deslogado: Mostra tela de login e esconde a interface atrás
+          document.getElementById('login-screen').style.display = 'flex';
+      }
+  });
 </script>
 
 <script>
@@ -634,6 +678,38 @@
 let db = { os: [], est: [], ven: [], ins: [] };
 let carrinhoPDV = [];
 let valoresOcultos = false;
+
+// FUNÇÕES DE LOGIN / LOGOUT
+window.fazerLogin = async function() {
+    const email = document.getElementById('loginEmail').value;
+    const senha = document.getElementById('loginSenha').value;
+    
+    if(!email || !senha) return;
+
+    try {
+        await window.fs_signIn(window.fs_auth, email, senha);
+        document.getElementById('loginError').style.display = 'none';
+        document.getElementById('loginEmail').value = '';
+        document.getElementById('loginSenha').value = '';
+    } catch(e) {
+        document.getElementById('loginError').style.display = 'block';
+        console.error("Erro no login:", e);
+    }
+}
+
+window.fazerLogout = async function() {
+    try {
+        await window.fs_signOut(window.fs_auth);
+        window.location.reload(); // Recarrega a página para limpar o cache visual
+    } catch (e) {
+        console.error("Erro ao deslogar:", e);
+    }
+}
+
+// Permitir login apertando "Enter"
+document.getElementById('loginSenha').addEventListener('keypress', function (e) {
+    if (e.key === 'Enter') fazerLogin();
+});
 
 // 1. CARREGAMENTO DOS DADOS EM TEMPO REAL E ORDENAÇÃO
 window.iniciarEscutaEmTempoReal = function() {
@@ -1624,7 +1700,6 @@ function importarDados() {
             try {
                 const c = JSON.parse(re.target.result);
                 
-                // Mapeamento compatível com versões antigas (ex: sgt_v5_os)
                 const importOs  = c.os  || c.sgt_os  || c.sgt_v5_os  || [];
                 const importEst = c.est || c.estoque || c.sgt_est || c.sgt_v5_est || [];
                 const importVen = c.ven || c.vendas  || c.sgt_ven || c.sgt_v5_ven || [];
@@ -1632,7 +1707,6 @@ function importarDados() {
                 
                 alert('Iniciando a substituição dos dados na Nuvem. Por favor, aguarde alguns segundos e não feche a página...');
                 
-                // 1. Limpa completamente o banco de dados online atual
                 await Promise.all([
                     limparColecao('sgt_os'),
                     limparColecao('sgt_est'),
@@ -1640,14 +1714,12 @@ function importarDados() {
                     limparColecao('sgt_ins')
                 ]);
 
-                // 2. Envia os novos dados (o onSnapshot fará a tela atualizar sozinha assim que entrarem)
                 const promessasDeEnvio = [];
                 importOs.forEach(o => promessasDeEnvio.push(salvarNoFirebase('sgt_os', o)));
                 importEst.forEach(e => promessasDeEnvio.push(salvarNoFirebase('sgt_est', e)));
                 importVen.forEach(v => promessasDeEnvio.push(salvarNoFirebase('sgt_ven', v)));
                 importIns.forEach(i => promessasDeEnvio.push(salvarNoFirebase('sgt_ins', i)));
 
-                // Aguarda o término de todo o upload
                 await Promise.all(promessasDeEnvio);
 
                 alert('Todos os dados antigos foram substituídos pelo backup com sucesso!');
@@ -1679,10 +1751,7 @@ function atualizarTudo() {
     atualizarDashboard();
 }
 
-// Inicializa a página e desenha os ícones da barra lateral
 lucide.createIcons();
-// A renderização aguardará o carregamento online
-atualizarTudo();
 </script>
 </body>
 </html>
